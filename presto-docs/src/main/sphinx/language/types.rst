@@ -22,6 +22,31 @@ DOUBLE
     A double is a 64-bit inexact, variable-precision implementing the
     IEEE Standard 754 for Binary Floating-Point Arithmetic.
 
+DECIMAL
+-------
+
+    A fixed precision decimal number. Precision up to 38 digits is supported
+    but performance is best up to 17 digits.
+
+    DECIMAL type takes two literal parameters:
+
+      - **precision** - total number of digits
+
+      - **scale** - number of digits in fractional part. Scale is optional and defaults to 0.
+
+    Example type definitions: ``DECIMAL(10,3)``, ``DECIMAL(20)``
+
+    Example literals: ``DECIMAL '10.3'``, ``DECIMAL '1234567890'``, ``1.1``
+
+    .. note::
+
+        Decimal literals (e.g. ``1.2``) are treated as the values of the ``DECIMAL`` type by default.
+
+        In order to keep compatibility with the previous versions of Presto set either:
+            - System wide property: ``parse-decimal-literals-as-double=true``
+            - Session wide property: ``parse_decimal_literals_as_double=true``
+
+
 VARCHAR
 -------
 

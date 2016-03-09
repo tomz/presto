@@ -33,11 +33,11 @@ import com.facebook.presto.operator.SourceOperatorFactory;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorPageSource;
 import com.facebook.presto.spi.ConnectorSplit;
+import com.facebook.presto.spi.DefaultRecordPageSource;
 import com.facebook.presto.spi.FixedPageSource;
 import com.facebook.presto.spi.HostAddress;
 import com.facebook.presto.spi.InMemoryRecordSet;
 import com.facebook.presto.spi.Page;
-import com.facebook.presto.spi.RecordPageSource;
 import com.facebook.presto.spi.RecordSet;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.type.TimeZoneKey;
@@ -415,7 +415,7 @@ public final class FunctionAssertions
     {
         Expression parsedExpression = SQL_PARSER.createExpression(expression);
 
-        final ExpressionAnalysis analysis = analyzeExpressionsWithSymbols(TEST_SESSION, metadata, SQL_PARSER, symbolTypes, ImmutableList.of(parsedExpression));
+        final ExpressionAnalysis analysis = analyzeExpressionsWithSymbols(TEST_SESSION, metadata, SQL_PARSER, symbolTypes, ImmutableList.of(parsedExpression), false /*is describe*/);
         Expression rewrittenExpression = ExpressionTreeRewriter.rewriteWith(new ExpressionRewriter<Void>()
         {
             @Override
@@ -431,7 +431,7 @@ public final class FunctionAssertions
                             rewrittenExpression,
                             coercion.getTypeSignature().toString(),
                             false,
-                            isTypeOnlyCoercion(type.getTypeSignature(), coercion.getTypeSignature()));
+                            isTypeOnlyCoercion(type, coercion));
                 }
 
                 return rewrittenExpression;
@@ -700,7 +700,7 @@ public final class FunctionAssertions
                                 packDateTimeWithZone(new DateTime(1970, 1, 1, 0, 1, 0, 999, DateTimeZone.UTC).getMillis(), TimeZoneKey.getTimeZoneKey("Z")),
                                 Slices.wrappedBuffer((byte) 0xab))
                         .build();
-                return new RecordPageSource(records);
+                return new DefaultRecordPageSource(records);
             }
             else {
                 return new FixedPageSource(ImmutableList.of(SOURCE_PAGE));

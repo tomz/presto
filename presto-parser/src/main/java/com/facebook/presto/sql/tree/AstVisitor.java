@@ -72,9 +72,39 @@ public abstract class AstVisitor<R, C>
         return visitLiteral(node, context);
     }
 
+    protected R visitDecimalLiteral(DecimalLiteral node, C context)
+    {
+        return visitLiteral(node, context);
+    }
+
     protected R visitStatement(Statement node, C context)
     {
         return visitNode(node, context);
+    }
+
+    protected R visitPrepare(Prepare node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitDeallocate(Deallocate node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitExecute(Execute node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitDescribeOutput(DescribeOutput node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitDescribeInput(DescribeInput node, C context)
+    {
+        return visitStatement(node, context);
     }
 
     protected R visitQuery(Query node, C context)
@@ -347,6 +377,11 @@ public abstract class AstVisitor<R, C>
         return visitLiteral(node, context);
     }
 
+    protected R visitParameter(Parameter node, C context)
+    {
+        return visitExpression(node, context);
+    }
+
     protected R visitLogicalBinaryExpression(LogicalBinaryExpression node, C context)
     {
         return visitExpression(node, context);
@@ -498,6 +533,11 @@ public abstract class AstVisitor<R, C>
     }
 
     protected R visitStartTransaction(StartTransaction node, C context)
+    {
+        return visitStatement(node, context);
+    }
+
+    protected R visitGrant(Grant node, C context)
     {
         return visitStatement(node, context);
     }

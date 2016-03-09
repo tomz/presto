@@ -45,6 +45,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
 
@@ -92,6 +93,13 @@ public class Analysis
 
     // for delete
     private Optional<Delete> delete = Optional.empty();
+
+    // for describe input and describe output
+    private boolean isDescribe = false;
+
+    // A row count query (as opposed to a result set query) is one that doesn't return
+    // any data, e.g. DDL (CREATE, ALTER, DROP, ...) and some DML (INSERT, UPDATE, DELETE, ...)
+    private boolean rowCountQuery = false;
 
     public Query getQuery()
     {
@@ -152,6 +160,11 @@ public class Analysis
     {
         checkArgument(types.containsKey(expression), "Expression not analyzed: %s", expression);
         return types.get(expression);
+    }
+
+    public Type getTypeAfterCoercion(Expression expression)
+    {
+        return firstNonNull(getCoercion(expression), getType(expression));
     }
 
     public Type[] getRelationCoercion(Relation relation)
@@ -408,6 +421,26 @@ public class Analysis
     {
         Preconditions.checkState(sampleRatios.containsKey(relation), "Sample ratio missing for %s. Broken analysis?", relation);
         return sampleRatios.get(relation);
+    }
+
+    public boolean isDescribe()
+    {
+        return isDescribe;
+    }
+
+    public void setIsDescribe(boolean isDescribe)
+    {
+        this.isDescribe = isDescribe;
+    }
+
+    public boolean isRowCountQuery()
+    {
+        return rowCountQuery;
+    }
+
+    public void setRowCountQuery(boolean rowCountQuery)
+    {
+        this.rowCountQuery = rowCountQuery;
     }
 
     public static class JoinInPredicates

@@ -26,6 +26,7 @@ import com.facebook.presto.sql.tree.CoalesceExpression;
 import com.facebook.presto.sql.tree.ComparisonExpression;
 import com.facebook.presto.sql.tree.Cube;
 import com.facebook.presto.sql.tree.CurrentTime;
+import com.facebook.presto.sql.tree.DecimalLiteral;
 import com.facebook.presto.sql.tree.DereferenceExpression;
 import com.facebook.presto.sql.tree.DoubleLiteral;
 import com.facebook.presto.sql.tree.ExistsPredicate;
@@ -51,6 +52,7 @@ import com.facebook.presto.sql.tree.Node;
 import com.facebook.presto.sql.tree.NotExpression;
 import com.facebook.presto.sql.tree.NullIfExpression;
 import com.facebook.presto.sql.tree.NullLiteral;
+import com.facebook.presto.sql.tree.Parameter;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.QualifiedNameReference;
 import com.facebook.presto.sql.tree.Rollup;
@@ -160,6 +162,12 @@ public final class ExpressionFormatter
         }
 
         @Override
+        protected String visitParameter(Parameter node, Boolean unmangleNames)
+        {
+            return "?";
+        }
+
+        @Override
         protected String visitArrayConstructor(ArrayConstructor node, Boolean unmangleNames)
         {
             ImmutableList.Builder<String> valueStrings = ImmutableList.builder();
@@ -184,7 +192,13 @@ public final class ExpressionFormatter
         @Override
         protected String visitDoubleLiteral(DoubleLiteral node, Boolean unmangleNames)
         {
-            return Double.toString(node.getValue());
+            return "DOUBLE '" + Double.toString(node.getValue()) + "'";
+        }
+
+        @Override
+        protected String visitDecimalLiteral(DecimalLiteral node, Boolean unmangleNames)
+        {
+            return "DECIMAL '" + node.getValue() + "'";
         }
 
         @Override

@@ -1,0 +1,6 @@
+-- type: hive
+CREATE EXTERNAL TABLE %NAME%(
+  c_char CHAR(10)
+)
+STORED AS ORC
+LOCATION '%LOCATION%'

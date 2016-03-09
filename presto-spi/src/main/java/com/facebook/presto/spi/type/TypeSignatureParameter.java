@@ -13,7 +13,6 @@
  */
 package com.facebook.presto.spi.type;
 
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -40,9 +39,9 @@ public class TypeSignatureParameter
         return new TypeSignatureParameter(ParameterKind.NAMED_TYPE, namedTypeSignature);
     }
 
-    public static TypeSignatureParameter of(TypeLiteralCalculation literalCalculation)
+    public static TypeSignatureParameter of(String variable)
     {
-        return new TypeSignatureParameter(ParameterKind.LITERAL_CALCULATION, literalCalculation);
+        return new TypeSignatureParameter(ParameterKind.VARIABLE, variable);
     }
 
     private TypeSignatureParameter(ParameterKind kind, Object value)
@@ -77,9 +76,9 @@ public class TypeSignatureParameter
         return kind == ParameterKind.NAMED_TYPE;
     }
 
-    public boolean isLiteralCalculation()
+    public boolean isVariable()
     {
-        return kind == ParameterKind.LITERAL_CALCULATION;
+        return kind == ParameterKind.VARIABLE;
     }
 
     private <A> A getValue(ParameterKind expectedParameterKind, Class<A> target)
@@ -103,9 +102,9 @@ public class TypeSignatureParameter
         return getValue(ParameterKind.NAMED_TYPE, NamedTypeSignature.class);
     }
 
-    public TypeLiteralCalculation getLiteralCalculation()
+    public String getVariable()
     {
-        return getValue(ParameterKind.LITERAL_CALCULATION, TypeLiteralCalculation.class);
+        return getValue(ParameterKind.VARIABLE, String.class);
     }
 
     public Optional<TypeSignature> getTypeSignatureOrNamedTypeSignature()
@@ -125,10 +124,14 @@ public class TypeSignatureParameter
         switch (kind) {
             case TYPE:
                 return getTypeSignature().isCalculated();
-            case LITERAL_CALCULATION:
+            case NAMED_TYPE:
+                return getNamedTypeSignature().getTypeSignature().isCalculated();
+            case LONG:
+                return false;
+            case VARIABLE:
                 return true;
             default:
-                return false;
+                throw new IllegalArgumentException("Unexpected parameter kind: " + kind);
         }
     }
 
@@ -152,20 +155,6 @@ public class TypeSignatureParameter
     public int hashCode()
     {
         return Objects.hash(kind, value);
-    }
-
-    public TypeSignatureParameter bindParameters(Map<String, Type> boundParameters)
-    {
-        switch (kind) {
-            case TYPE:
-                return TypeSignatureParameter.of(getTypeSignature().bindParameters(boundParameters));
-            case NAMED_TYPE:
-                return TypeSignatureParameter.of(new NamedTypeSignature(
-                        getNamedTypeSignature().getName(),
-                        getNamedTypeSignature().getTypeSignature().bindParameters(boundParameters)));
-            default:
-                return this;
-        }
     }
 
     private static void verify(boolean argument, String message)

@@ -23,15 +23,20 @@ import com.facebook.presto.sql.tree.Commit;
 import com.facebook.presto.sql.tree.CreateTable;
 import com.facebook.presto.sql.tree.CreateTableAsSelect;
 import com.facebook.presto.sql.tree.CreateView;
+import com.facebook.presto.sql.tree.Deallocate;
 import com.facebook.presto.sql.tree.Delete;
+import com.facebook.presto.sql.tree.DescribeInput;
+import com.facebook.presto.sql.tree.DescribeOutput;
 import com.facebook.presto.sql.tree.DropTable;
 import com.facebook.presto.sql.tree.DropView;
 import com.facebook.presto.sql.tree.Except;
+import com.facebook.presto.sql.tree.Execute;
 import com.facebook.presto.sql.tree.Explain;
 import com.facebook.presto.sql.tree.ExplainFormat;
 import com.facebook.presto.sql.tree.ExplainOption;
 import com.facebook.presto.sql.tree.ExplainType;
 import com.facebook.presto.sql.tree.Expression;
+import com.facebook.presto.sql.tree.Grant;
 import com.facebook.presto.sql.tree.Insert;
 import com.facebook.presto.sql.tree.Intersect;
 import com.facebook.presto.sql.tree.Isolation;
@@ -39,8 +44,10 @@ import com.facebook.presto.sql.tree.Join;
 import com.facebook.presto.sql.tree.JoinCriteria;
 import com.facebook.presto.sql.tree.JoinOn;
 import com.facebook.presto.sql.tree.JoinUsing;
+import com.facebook.presto.sql.tree.Literal;
 import com.facebook.presto.sql.tree.NaturalJoin;
 import com.facebook.presto.sql.tree.Node;
+import com.facebook.presto.sql.tree.Prepare;
 import com.facebook.presto.sql.tree.Query;
 import com.facebook.presto.sql.tree.QuerySpecification;
 import com.facebook.presto.sql.tree.Relation;
@@ -76,6 +83,7 @@ import com.google.common.base.Strings;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static com.facebook.presto.sql.ExpressionFormatter.formatExpression;
 import static com.facebook.presto.sql.ExpressionFormatter.formatGroupBy;
@@ -135,6 +143,55 @@ public final class SqlFormatter
         protected Void visitUnnest(Unnest node, Integer indent)
         {
             builder.append(node.toString());
+            return null;
+        }
+
+        @Override
+        protected Void visitPrepare(Prepare node, Integer indent)
+        {
+            append(indent, "PREPARE ");
+            builder.append(node.getName());
+            builder.append(" FROM");
+            builder.append("\n");
+            process(node.getStatement(), indent + 1);
+            return null;
+        }
+
+        @Override
+        protected Void visitDeallocate(Deallocate node, Integer indent)
+        {
+            append(indent, "DEALLOCATE PREPARE ");
+            builder.append(node.getName());
+            return null;
+        }
+
+        @Override
+        protected Void visitExecute(Execute node, Integer indent)
+        {
+            append(indent, "EXECUTE ");
+            builder.append(node.getName());
+            List<Literal> parameters = node.getParameters();
+            if (!parameters.isEmpty()) {
+                builder.append(" USING ");
+                String parameterString = Joiner.on(", ").join(parameters);
+                builder.append(parameterString);
+            }
+            return null;
+        }
+
+        @Override
+        protected Void visitDescribeOutput(DescribeOutput node, Integer indent)
+        {
+            append(indent, "DESCRIBE OUTPUT ");
+            builder.append(node.getName());
+            return null;
+        }
+
+        @Override
+        protected Void visitDescribeInput(DescribeInput node, Integer indent)
+        {
+            append(indent, "DESCRIBE INPUT ");
+            builder.append(node.getName());
             return null;
         }
 
@@ -817,6 +874,28 @@ public final class SqlFormatter
         protected Void visitRollback(Rollback node, Integer context)
         {
             builder.append("ROLLBACK");
+            return null;
+        }
+
+        @Override
+        public Void visitGrant(Grant node, Integer indent)
+        {
+            builder.append("GRANT ");
+
+            builder.append(node.getPrivileges().stream()
+                    .collect(Collectors.joining(", ")));
+
+            builder.append(" ON ");
+            if (node.isTable()) {
+                builder.append("TABLE ");
+            }
+            builder.append(node.getTableName())
+                    .append(" TO ")
+                    .append(node.getGrantee());
+            if (node.isWithGrantOption()) {
+                builder.append(" WITH GRANT OPTION");
+            }
+
             return null;
         }
 

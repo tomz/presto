@@ -21,6 +21,7 @@ import com.facebook.presto.operator.scalar.MathFunctions;
 import com.facebook.presto.operator.scalar.RegexpFunctions;
 import com.facebook.presto.operator.scalar.StringFunctions;
 import com.facebook.presto.spi.ConnectorSession;
+import com.facebook.presto.spi.type.SqlDecimal;
 import com.facebook.presto.spi.type.SqlTimestamp;
 import com.facebook.presto.spi.type.SqlTimestampWithTimeZone;
 import com.facebook.presto.spi.type.SqlVarbinary;
@@ -52,6 +53,10 @@ import org.testng.annotations.BeforeSuite;
 import org.testng.annotations.Test;
 
 import java.lang.reflect.Method;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.text.DecimalFormat;
+import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -63,7 +68,9 @@ import static com.facebook.presto.SessionTestUtils.TEST_SESSION;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DateTimeEncoding.packDateTimeWithZone;
+import static com.facebook.presto.spi.type.DecimalType.createDecimalType;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
+import static com.facebook.presto.spi.type.SqlDecimal.decimal;
 import static com.facebook.presto.spi.type.TimeZoneKey.UTC_KEY;
 import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
 import static com.facebook.presto.spi.type.TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE;
@@ -95,6 +102,14 @@ public class TestExpressionCompiler
                                                  Double.MIN_VALUE, Double.MAX_VALUE, Double.MIN_NORMAL, null};
     private static final Double[] doubleRights = {3.0, -3.0, 3.1, -3.1, null};
     private static final Double[] doubleMiddle = {9.0, -3.1, 88.0, null};
+
+    private static final BigDecimal[] decimalLefts = {new BigDecimal("9.0"), new BigDecimal("10.0"), new BigDecimal("11.0"), new BigDecimal("-9.0"),
+                                                      new BigDecimal("-10.0"), new BigDecimal("-11.0"), new BigDecimal("9.1"), new BigDecimal("10.1"),
+                                                      new BigDecimal("11.1"), new BigDecimal("-9.1"), new BigDecimal("-10.1"), new BigDecimal("-11.1"),
+                                                      new BigDecimal("9223372036.5477"), new BigDecimal("-9223372036.5477"), null};
+    private static final BigDecimal[] decimalRights = {new BigDecimal("3.0"), new BigDecimal("-3.0"), new BigDecimal("3.1"), new BigDecimal("-3.1"), null};
+    private static final BigDecimal[] decimalMiddle = {new BigDecimal("9.0"), new BigDecimal("-3.1"), new BigDecimal("88.0"), null};
+
     private static final String[] stringLefts = {"hello", "foo", "mellow", "fellow", "", null};
     private static final String[] stringRights = {"hello", "foo", "bar", "baz", "", null};
 
@@ -175,7 +190,8 @@ public class TestExpressionCompiler
         assertExecute("false", BOOLEAN, false);
         assertExecute("42", BIGINT, 42L);
         assertExecute("'foo'", createVarcharType(3), "foo");
-        assertExecute("4.2", DOUBLE, 4.2);
+        assertExecute("CAST(4.2 as DOUBLE)", DOUBLE, 4.2);
+        assertExecute("4.2", createDecimalType(2, 1), new SqlDecimal(BigInteger.valueOf(42), 2, 1));
         assertExecute("1 + 1", BIGINT, 2L);
         assertExecute("X' 1 f'", VARBINARY, new SqlVarbinary(Slices.wrappedBuffer((byte) 0x1f).getBytes()));
         assertExecute("X' '", VARBINARY, new SqlVarbinary(new byte[0]));
@@ -187,7 +203,7 @@ public class TestExpressionCompiler
         assertExecute("bound_pattern", VARCHAR, "%el%");
         assertExecute("bound_null_string", VARCHAR, null);
         assertExecute("bound_timestamp_with_timezone", TIMESTAMP_WITH_TIME_ZONE, new SqlTimestampWithTimeZone(new DateTime(1970, 1, 1, 0, 1, 0, 999, DateTimeZone.UTC).getMillis(), TimeZoneKey.getTimeZoneKey("Z")));
-        assertExecute("bound_binary_literal", VARBINARY, new SqlVarbinary(new byte[]{(byte) 0xab}));
+        assertExecute("bound_binary_literal", VARBINARY, new SqlVarbinary(new byte[] {(byte) 0xab}));
 
         // todo enable when null output type is supported
         // assertExecute("null", null);
@@ -238,6 +254,13 @@ public class TestExpressionCompiler
         for (Double value : doubleLefts) {
             assertExecute(generateExpression("%s", value), DOUBLE, value == null ? null : value);
             assertExecute(generateExpression("- (%s)", value), DOUBLE, value == null ? null : -value);
+            assertExecute(generateExpression("%s is null", value), BOOLEAN, value == null);
+            assertExecute(generateExpression("%s is not null", value), BOOLEAN, value != null);
+        }
+
+        for (BigDecimal value : decimalLefts) {
+            assertExecute(generateExpression("%s", value), value == null ? null : value);
+            assertExecute(generateExpression("- (%s)", value), value == null ? null : value.negate());
             assertExecute(generateExpression("%s is null", value), BOOLEAN, value == null);
             assertExecute(generateExpression("%s is not null", value), BOOLEAN, value != null);
         }
@@ -414,6 +437,111 @@ public class TestExpressionCompiler
         Futures.allAsList(futures).get();
     }
 
+    @Test
+    public void testBinaryOperatorsDecimalDouble()
+            throws Exception
+    {
+        for (BigDecimal left : decimalLefts) {
+            for (Double right : doubleRights) {
+                assertExecute(generateExpression("%s = %s", left, right), BOOLEAN, left == null || right == null ? null : left.doubleValue() == right);
+                assertExecute(generateExpression("%s <> %s", left, right), BOOLEAN, left == null || right == null ? null : left.doubleValue() != right);
+                assertExecute(generateExpression("%s > %s", left, right), BOOLEAN, left == null || right == null ? null : left.doubleValue() > right);
+                assertExecute(generateExpression("%s < %s", left, right), BOOLEAN, left == null || right == null ? null : left.doubleValue() < right);
+                assertExecute(generateExpression("%s >= %s", left, right), BOOLEAN, left == null || right == null ? null : left.doubleValue() >= right);
+                assertExecute(generateExpression("%s <= %s", left, right), BOOLEAN, left == null || right == null ? null : left.doubleValue() <= right);
+
+                assertExecute(generateExpression("nullif(%s, %s)", left, right), BigDecimal.class.cast(nullIf(left, right)));
+
+                assertExecute(generateExpression("%s is distinct from %s", left, right), BOOLEAN, !Objects.equals(left == null ? null : left.doubleValue(), right));
+
+                assertExecute(generateExpression("%s + %s", left, right), DOUBLE, left == null || right == null ? null : left.doubleValue() + right);
+                assertExecute(generateExpression("%s - %s", left, right), DOUBLE, left == null || right == null ? null : left.doubleValue() - right);
+                assertExecute(generateExpression("%s * %s", left, right), DOUBLE, left == null || right == null ? null : left.doubleValue() * right);
+                assertExecute(generateExpression("%s / %s", left, right), DOUBLE, left == null || right == null ? null : left.doubleValue() / right);
+                assertExecute(generateExpression("%s %% %s", left, right), DOUBLE, left == null || right == null ? null : left.doubleValue() % right);
+            }
+        }
+
+        Futures.allAsList(futures).get();
+    }
+
+    @Test
+    public void testBinaryOperatorsDoubleDecimal()
+            throws Exception
+    {
+        for (Double left : doubleLefts) {
+            for (BigDecimal right : decimalRights) {
+                assertExecute(generateExpression("%s = %s", left, right), BOOLEAN, left == null || right == null ? null : left == right.doubleValue());
+                assertExecute(generateExpression("%s <> %s", left, right), BOOLEAN, left == null || right == null ? null : left != right.doubleValue());
+                assertExecute(generateExpression("%s > %s", left, right), BOOLEAN, left == null || right == null ? null : left > right.doubleValue());
+                assertExecute(generateExpression("%s < %s", left, right), BOOLEAN, left == null || right == null ? null : left < right.doubleValue());
+                assertExecute(generateExpression("%s >= %s", left, right), BOOLEAN, left == null || right == null ? null : left >= right.doubleValue());
+                assertExecute(generateExpression("%s <= %s", left, right), BOOLEAN, left == null || right == null ? null : left <= right.doubleValue());
+
+                assertExecute(generateExpression("nullif(%s, %s)", left, right), DOUBLE, nullIf(left, right));
+                assertExecute(generateExpression("%s is distinct from %s", left, right), BOOLEAN, !Objects.equals(left, right == null ? null : right.doubleValue()));
+
+                assertExecute(generateExpression("%s + %s", left, right), DOUBLE, left == null || right == null ? null : left + right.doubleValue());
+                assertExecute(generateExpression("%s - %s", left, right), DOUBLE, left == null || right == null ? null : left - right.doubleValue());
+                assertExecute(generateExpression("%s * %s", left, right), DOUBLE, left == null || right == null ? null : left * right.doubleValue());
+                assertExecute(generateExpression("%s / %s", left, right), DOUBLE, left == null || right == null ? null : left / right.doubleValue());
+                assertExecute(generateExpression("%s %% %s", left, right), DOUBLE, left == null || right == null ? null : left % right.doubleValue());
+            }
+        }
+
+        Futures.allAsList(futures).get();
+    }
+
+    @Test
+    public void testBinaryOperatorsDecimalLong()
+            throws Exception
+    {
+        for (BigDecimal left : decimalLefts) {
+            for (Long right : longRights) {
+                assertExecute(generateExpression("%s = %s", left, right), BOOLEAN, left == null || right == null ? null : left.equals(new BigDecimal(right)));
+                assertExecute(generateExpression("%s <> %s", left, right), BOOLEAN, left == null || right == null ? null : !left.equals(new BigDecimal(right)));
+                assertExecute(generateExpression("%s > %s", left, right), BOOLEAN, left == null || right == null ? null : left.compareTo(new BigDecimal(right)) > 0);
+                assertExecute(generateExpression("%s < %s", left, right), BOOLEAN, left == null || right == null ? null : left.compareTo(new BigDecimal(right)) < 0);
+                assertExecute(generateExpression("%s >= %s", left, right), BOOLEAN, left == null || right == null ? null : left.compareTo(new BigDecimal(right)) >= 0);
+                assertExecute(generateExpression("%s <= %s", left, right), BOOLEAN, left == null || right == null ? null : left.compareTo(new BigDecimal(right)) <= 0);
+
+                assertExecute(generateExpression("nullif(%s, %s)", left, right), BigDecimal.class.cast(nullIf(left, right)));
+
+                assertExecute(generateExpression("%s is distinct from %s", left, right), BOOLEAN,
+                        !Objects.equals(left, right == null ? null : new BigDecimal(right)));
+
+                // arithmetic operators are already tested in TestDecimalOperators
+            }
+        }
+
+        Futures.allAsList(futures).get();
+    }
+
+    @Test
+    public void testBinaryOperatorsLongDecimal()
+            throws Exception
+    {
+        for (Long left : longLefts) {
+            for (BigDecimal right : decimalRights) {
+                assertExecute(generateExpression("%s = %s", left, right), BOOLEAN, left == null || right == null ? null : new BigDecimal(left).equals(right));
+                assertExecute(generateExpression("%s <> %s", left, right), BOOLEAN, left == null || right == null ? null : !new BigDecimal(left).equals(right));
+                assertExecute(generateExpression("%s > %s", left, right), BOOLEAN, left == null || right == null ? null : new BigDecimal(left).compareTo(right) > 0);
+                assertExecute(generateExpression("%s < %s", left, right), BOOLEAN, left == null || right == null ? null : new BigDecimal(left).compareTo(right) < 0);
+                assertExecute(generateExpression("%s >= %s", left, right), BOOLEAN, left == null || right == null ? null : new BigDecimal(left).compareTo(right) >= 0);
+                assertExecute(generateExpression("%s <= %s", left, right), BOOLEAN, left == null || right == null ? null : new BigDecimal(left).compareTo(right) <= 0);
+
+                assertExecute(generateExpression("nullif(%s, %s)", left, right), BIGINT, left);
+
+                assertExecute(generateExpression("%s is distinct from %s", left, right), BOOLEAN,
+                        !Objects.equals(left == null ? null : new BigDecimal(left), right));
+
+                // arithmetic operators are already tested in TestDecimalOperators
+            }
+        }
+
+        Futures.allAsList(futures).get();
+    }
+
     private static VarcharType varcharType(String... values)
     {
         return varcharType(Arrays.asList(values));
@@ -508,6 +636,40 @@ public class TestExpressionCompiler
                     assertExecute(generateExpression("%s between %s and %s", first, second, third),
                             BOOLEAN,
                             first == null || second == null || third == null ? null : second.compareTo(first) <= 0 && first.compareTo(third) <= 0);
+                }
+            }
+        }
+
+        Futures.allAsList(futures).get();
+    }
+
+    @Test
+    public void testTernaryOperatorsLongDecimal()
+            throws Exception
+    {
+        for (Long first : longLefts) {
+            for (BigDecimal second : decimalMiddle) {
+                for (Long third : longRights) {
+                    assertExecute(generateExpression("%s between %s and %s", first, second, third),
+                            BOOLEAN,
+                            first == null || second == null || third == null ? null : second.compareTo(new BigDecimal(first)) <= 0 && first <= third);
+                }
+            }
+        }
+
+        Futures.allAsList(futures).get();
+    }
+
+    @Test
+    public void testTernaryOperatorsDecimalDouble()
+            throws Exception
+    {
+        for (BigDecimal first : decimalLefts) {
+            for (Double second : doubleMiddle) {
+                for (BigDecimal third : decimalRights) {
+                    assertExecute(generateExpression("%s between %s and %s", first, second, third),
+                            BOOLEAN,
+                            first == null || second == null || third == null ? null : second <= first.doubleValue() && first.compareTo(third) <= 0);
                 }
             }
         }
@@ -716,6 +878,27 @@ public class TestExpressionCompiler
             }
         }
 
+        for (BigDecimal value : decimalLefts) {
+            for (BigDecimal firstTest : decimalMiddle) {
+                for (BigDecimal secondTest : decimalRights) {
+                    String expected;
+                    if (value == null) {
+                        expected = null;
+                    }
+                    else if (firstTest != null && firstTest.equals(value)) {
+                        expected = "first";
+                    }
+                    else if (secondTest != null && secondTest.equals(value)) {
+                        expected = "second";
+                    }
+                    else {
+                        expected = null;
+                    }
+                    assertExecute(generateExpression("case %s when %s then 'first' when %s then 'second' end", value, firstTest, secondTest), createVarcharType(6), expected);
+                }
+            }
+        }
+
         Futures.allAsList(futures).get();
     }
 
@@ -743,6 +926,30 @@ public class TestExpressionCompiler
                     List<String> expressions = formatExpression("case when %s = %s then 'first' when %s = %s then 'second' else 'else' end",
                             Arrays.<Object>asList(value, firstTest, value, secondTest),
                             ImmutableList.of("double", "bigint", "double", "double"));
+                    assertExecute(expressions, createVarcharType(6), expected);
+                }
+            }
+        }
+
+        for (Double value : doubleLefts) {
+            for (Long firstTest : longLefts) {
+                for (BigDecimal secondTest : decimalRights) {
+                    String expected;
+                    if (value == null) {
+                        expected = "else";
+                    }
+                    else if (firstTest != null && (double) value == firstTest) {
+                        expected = "first";
+                    }
+                    else if (secondTest != null && value == secondTest.doubleValue()) {
+                        expected = "second";
+                    }
+                    else {
+                        expected = "else";
+                    }
+                    List<String> expressions = formatExpression("case when %s = %s then 'first' when %s = %s then 'second' else 'else' end",
+                            Arrays.<Object>asList(value, firstTest, value, secondTest),
+                            ImmutableList.of("double", "bigint", "double", "decimal(1,0)"));
                     assertExecute(expressions, createVarcharType(6), expected);
                 }
             }
@@ -779,6 +986,30 @@ public class TestExpressionCompiler
             }
         }
 
+        for (BigDecimal value : decimalLefts) {
+            for (Long firstTest : longLefts) {
+                for (Double secondTest : doubleRights) {
+                    String expected;
+                    if (value == null) {
+                        expected = null;
+                    }
+                    else if (firstTest != null && value.doubleValue() == firstTest) {
+                        expected = "first";
+                    }
+                    else if (secondTest != null && value.doubleValue() == secondTest) {
+                        expected = "second";
+                    }
+                    else {
+                        expected = null;
+                    }
+                    List<String> expressions = formatExpression("case when %s = %s then 'first' when %s = %s then 'second' end",
+                            Arrays.<Object>asList(value, firstTest, value, secondTest),
+                            ImmutableList.of("decimal(1,0)", "bigint", "decimal(1,0)", "double"));
+                    assertExecute(expressions, createVarcharType(6), expected);
+                }
+            }
+        }
+
         Futures.allAsList(futures).get();
     }
 
@@ -803,54 +1034,92 @@ public class TestExpressionCompiler
             assertExecute(generateExpression("%s in (null, 33, 9, -9, -33)", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value) ? true : null);
-
+            assertExecute(generateExpression("%s in (CAST(null AS BIGINT), 33, 9, -9, -33)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
             assertExecute(generateExpression("%s in (33, null, 9, -9, -33)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
+            assertExecute(generateExpression("%s in (33, CAST(null AS BIGINT), 9, -9, -33)", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value) ? true : null);
 
             // compare a long to in containing doubles
-            assertExecute(generateExpression("%s in (33, 9.0, -9, -33)", value),
+            assertExecute(generateExpression("%s in (33, CAST(9.0 as DOUBLE), -9, -33)", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value));
-            assertExecute(generateExpression("%s in (null, 33, 9.0, -9, -33)", value),
+            assertExecute(generateExpression("%s in (null, 33, CAST(9.0 as DOUBLE), -9, -33)", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value) ? true : null);
-            assertExecute(generateExpression("%s in (33.0, null, 9.0, -9, -33)", value),
+            assertExecute(generateExpression("%s in (CAST(33.0 as DOUBLE), null, CAST(9.0 as DOUBLE), -9, -33)", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value) ? true : null);
         }
 
         for (Double value : doubleLefts) {
             List<Double> testValues = Arrays.asList(33.0, 9.0, -9.0, -33.0);
-            assertExecute(generateExpression("%s in (33.0, 9.0, -9.0, -33.0)", value),
+            assertExecute(generateExpression("%s in (CAST(33.0 as DOUBLE), CAST(9.0 as DOUBLE), -CAST(9.0 as DOUBLE), -CAST(33.0 as DOUBLE))", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value));
-            assertExecute(generateExpression("%s in (null, 33.0, 9.0, -9.0, -33.0)", value),
+            assertExecute(generateExpression("%s in (null, CAST(33.0 as DOUBLE), CAST(9.0 as DOUBLE), -CAST(9.0 as DOUBLE), -CAST(33.0 as DOUBLE))", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value) ? true : null);
-            assertExecute(generateExpression("%s in (33.0, null, 9.0, -9.0, -33.0)", value),
+            assertExecute(generateExpression("%s in (CAST(33.0 as DOUBLE), null, CAST(9.0 as DOUBLE), -CAST(9.0 as DOUBLE), -CAST(33.0 as DOUBLE))", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value) ? true : null);
 
             // compare a double to in containing longs
-            assertExecute(generateExpression("%s in (33.0, 9, -9, -33.0)", value),
+            assertExecute(generateExpression("%s in (CAST(33.0 as DOUBLE), 9, -9, -CAST(33.0 as DOUBLE))", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value));
-            assertExecute(generateExpression("%s in (null, 33.0, 9, -9, -33.0)", value),
+            assertExecute(generateExpression("%s in (null, CAST(33.0 as DOUBLE), 9, -9, -CAST(33.0 as DOUBLE))", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value) ? true : null);
-            assertExecute(generateExpression("%s in (33.0, null, 9, -9, -33.0)", value),
+            assertExecute(generateExpression("%s in (CAST(33.0 as DOUBLE), null, 9, -9, -CAST(33.0 as DOUBLE))", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value) ? true : null);
 
             // compare to dynamically computed values
             testValues = Arrays.asList(33.0, cos(9.0), cos(-9.0), -33.0);
-            assertExecute(generateExpression("cos(%s) in (33.0, cos(9.0), cos(-9.0), -33.0)", value),
+            assertExecute(generateExpression("cos(%s) in (CAST(33.0 as DOUBLE), cos(CAST(9.0 as DOUBLE)), cos(-CAST(9.0 as DOUBLE)), -CAST(33.0 as DOUBLE))", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(cos(value)));
-            assertExecute(generateExpression("cos(%s) in (null, 33.0, cos(9.0), cos(-9.0), -33.0)", value),
+            assertExecute(generateExpression("cos(%s) in (null, CAST(33.0 as DOUBLE), cos(CAST(9.0 as DOUBLE)), cos(-CAST(9.0 as DOUBLE)), -CAST(33.0 as DOUBLE))", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(cos(value)) ? true : null);
+        }
+
+        for (BigDecimal value : decimalLefts) {
+            List<BigDecimal> testValues = ImmutableList.of(new BigDecimal("9.0"), new BigDecimal("10.0"), new BigDecimal("-11.0"), new BigDecimal("9223372036.5477"));
+            assertExecute(generateExpression("%s in (9.0, 10.0, -11.0, 9223372036.5477)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value));
+            assertExecute(generateExpression("%s in (null, 9.0, 10.0, -11.0, 9223372036.5477)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
+            assertExecute(generateExpression("%s in (CAST(null AS DECIMAL(1,0)), 9.0, 10.0, -11.0, 9223372036.5477)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
+            assertExecute(generateExpression("%s in (9.0, CAST(null AS DECIMAL(1,0)), 10.0, -11.0, 9223372036.5477)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
+            assertExecute(generateExpression("%s in (9.0, null, 10.0, -11.0, 9223372036.5477)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
+
+            // compare a long to in containing doubles
+            assertExecute(generateExpression("%s in (9.0, 10.0, CAST(-11.0 as DOUBLE), 9223372036.5477)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value));
+            assertExecute(generateExpression("%s in (null, 9.0, 10.0, CAST(-11.0 as DOUBLE), 9223372036.5477)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
+            assertExecute(generateExpression("%s in (null, 9, 10.0, CAST(-11.0 as DOUBLE), 9223372036.5477)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
+            assertExecute(generateExpression("%s in (CAST(9.0 as DOUBLE), null, 10.0, CAST(-11.0 as DOUBLE), 9223372036.5477)", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
         }
 
         for (String value : stringLefts) {
@@ -862,6 +1131,12 @@ public class TestExpressionCompiler
                     BOOLEAN,
                     value == null ? null : testValues.contains(value) ? true : null);
             assertExecute(generateExpression("%s in ('what?', null, 'foo', 'mellow', 'end')", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
+            assertExecute(generateExpression("%s in (cast('what?' AS VARCHAR(10)), cast('foo' AS VARCHAR(10)), null, 'mellow', 'end')", value),
+                    BOOLEAN,
+                    value == null ? null : testValues.contains(value) ? true : null);
+            assertExecute(generateExpression("%s in ('what?', CAST(null AS VARCHAR(10)), 'foo', 'mellow', 'end')", value),
                     BOOLEAN,
                     value == null ? null : testValues.contains(value) ? true : null);
         }
@@ -880,9 +1155,9 @@ public class TestExpressionCompiler
         assertExecute("bound_long in (" + longValues + ")", BOOLEAN, false);
 
         String doubleValues = range(2000, 7000).asDoubleStream()
-                .mapToObj(Double::toString)
+                .mapToObj(this::formatDoubleToScientificNotation)
                 .collect(joining(", "));
-        assertExecute("bound_double in (12.34, " + doubleValues + ")", BOOLEAN, true);
+        assertExecute("bound_double in (12.34E0, " + doubleValues + ")", BOOLEAN, true);
         assertExecute("bound_double in (" + doubleValues + ")", BOOLEAN, false);
 
         String stringValues = range(2000, 7000).asLongStream()
@@ -925,6 +1200,18 @@ public class TestExpressionCompiler
         for (Double left : doubleLefts) {
             for (Double right : doubleRights) {
                 assertExecute(generateExpression("log(%s, %s)", left, right), DOUBLE, left == null || right == null ? null : MathFunctions.log(left, right));
+            }
+        }
+
+        for (Double left : doubleLefts) {
+            for (BigDecimal right : decimalRights) {
+                assertExecute(generateExpression("log(%s, %s)", left, right), DOUBLE, left == null || right == null ? null : MathFunctions.log(left, right.doubleValue()));
+            }
+        }
+
+        for (BigDecimal left : decimalLefts) {
+            for (Long right : longRights) {
+                assertExecute(generateExpression("log(%s, %s)", left, right), DOUBLE, left == null || right == null ? null : MathFunctions.log(left.doubleValue(), right));
             }
         }
 
@@ -1100,18 +1387,18 @@ public class TestExpressionCompiler
         assertExecute("coalesce(cast(null as bigint), 9, null)", BIGINT, 9L);
         assertExecute("coalesce(cast(null as bigint), 9, cast(null as bigint))", BIGINT, 9L);
 
-        assertExecute("coalesce(9.0, 1.0)", DOUBLE, 9.0);
-        assertExecute("coalesce(9.0, 1)", DOUBLE, 9.0);
-        assertExecute("coalesce(9.0, null)", DOUBLE, 9.0);
-        assertExecute("coalesce(9.0, cast(null as double))", DOUBLE, 9.0);
-        assertExecute("coalesce(null, 9.0, 1)", DOUBLE, 9.0);
-        assertExecute("coalesce(null, 9.0, null)", DOUBLE, 9.0);
-        assertExecute("coalesce(null, 9.0, cast(null as double))", DOUBLE, 9.0);
-        assertExecute("coalesce(null, 9.0, cast(null as bigint))", DOUBLE, 9.0);
-        assertExecute("coalesce(cast(null as bigint), 9.0, 1)", DOUBLE, 9.0);
-        assertExecute("coalesce(cast(null as bigint), 9.0, null)", DOUBLE, 9.0);
-        assertExecute("coalesce(cast(null as bigint), 9.0, cast(null as bigint))", DOUBLE, 9.0);
-        assertExecute("coalesce(cast(null as double), 9.0, cast(null as double))", DOUBLE, 9.0);
+        assertExecute("coalesce(CAST(9.0 as DOUBLE), CAST(1.0 as DOUBLE))", DOUBLE, 9.0);
+        assertExecute("coalesce(CAST(9.0 as DOUBLE), 1)", DOUBLE, 9.0);
+        assertExecute("coalesce(CAST(9.0 as DOUBLE), null)", DOUBLE, 9.0);
+        assertExecute("coalesce(CAST(9.0 as DOUBLE), cast(null as double))", DOUBLE, 9.0);
+        assertExecute("coalesce(null, CAST(9.0 as DOUBLE), 1)", DOUBLE, 9.0);
+        assertExecute("coalesce(null, CAST(9.0 as DOUBLE), null)", DOUBLE, 9.0);
+        assertExecute("coalesce(null, CAST(9.0 as DOUBLE), cast(null as double))", DOUBLE, 9.0);
+        assertExecute("coalesce(null, CAST(9.0 as DOUBLE), cast(null as bigint))", DOUBLE, 9.0);
+        assertExecute("coalesce(cast(null as bigint), CAST(9.0 as DOUBLE), 1)", DOUBLE, 9.0);
+        assertExecute("coalesce(cast(null as bigint), CAST(9.0 as DOUBLE), null)", DOUBLE, 9.0);
+        assertExecute("coalesce(cast(null as bigint), CAST(9.0 as DOUBLE), cast(null as bigint))", DOUBLE, 9.0);
+        assertExecute("coalesce(cast(null as double), CAST(9.0 as DOUBLE), cast(null as double))", DOUBLE, 9.0);
 
         assertExecute("coalesce('foo', 'banana')", createVarcharType(6), "foo");
         assertExecute("coalesce('foo', null)", createVarcharType(3), "foo");
@@ -1124,6 +1411,11 @@ public class TestExpressionCompiler
         assertExecute("coalesce(cast(null as varchar), 'foo', cast(null as varchar))", VARCHAR, "foo");
 
         assertExecute("coalesce(cast(null as bigint), null, cast(null as bigint))", BIGINT, null);
+
+        assertExecute("coalesce(2.1, null, cast(null as decimal(5,3)))", decimal("02.100"));
+        assertExecute("coalesce(cast(null as decimal(17,3)), null, cast(null as decimal(12,3)))", createDecimalType(17, 3), null);
+        assertExecute("coalesce(3, 2.1, null, cast(null as decimal(6,3)))", decimal("0000000000000000003.000"));
+        assertExecute("coalesce(cast(null as decimal(17,3)), null, cast(null as decimal(12,3)))", createDecimalType(17, 3), null);
 
         Futures.allAsList(futures).get();
     }
@@ -1146,6 +1438,11 @@ public class TestExpressionCompiler
     private List<String> generateExpression(String expressionPattern, String value)
     {
         return formatExpression(expressionPattern, value, "varchar");
+    }
+
+    private List<String> generateExpression(String expressionPattern, BigDecimal value)
+    {
+        return formatExpression(expressionPattern, value, "decimal(1,0)");
     }
 
     private List<String> generateExpression(String expressionPattern, Boolean left, Boolean right)
@@ -1173,6 +1470,26 @@ public class TestExpressionCompiler
         return formatExpression(expressionPattern, left, "double", right, "double");
     }
 
+    private List<String> generateExpression(String expressionPattern, Double left, BigDecimal right)
+    {
+        return formatExpression(expressionPattern, left, "double", right, "decimal(1,0)");
+    }
+
+    private List<String> generateExpression(String expressionPattern, BigDecimal left, Double right)
+    {
+        return formatExpression(expressionPattern, left, "decimal(1,0)", right, "double");
+    }
+
+    private List<String> generateExpression(String expressionPattern, Long left, BigDecimal right)
+    {
+        return formatExpression(expressionPattern, left, "bigint", right, "decimal(1,0)");
+    }
+
+    private List<String> generateExpression(String expressionPattern, BigDecimal left, Long right)
+    {
+        return formatExpression(expressionPattern, left, "decimal(1,0)", right, "bigint");
+    }
+
     private List<String> generateExpression(String expressionPattern, String left, String right)
     {
         return formatExpression(expressionPattern, left, "varchar", right, "varchar");
@@ -1181,6 +1498,11 @@ public class TestExpressionCompiler
     private List<String> generateExpression(String expressionPattern, Long first, Long second, Long third)
     {
         return formatExpression(expressionPattern, first, "bigint", second, "bigint", third, "bigint");
+    }
+
+    private List<String> generateExpression(String expressionPattern, BigDecimal first, BigDecimal second, BigDecimal third)
+    {
+        return formatExpression(expressionPattern, first, "decimal(1,0)", second, "decimal(1,0)", third, "decimal(1,0)");
     }
 
     private List<String> generateExpression(String expressionPattern, Long first, Double second, Long third)
@@ -1216,6 +1538,16 @@ public class TestExpressionCompiler
     private List<String> generateExpression(String expressionPattern, String first, Long second, Long third)
     {
         return formatExpression(expressionPattern, first, "varchar", second, "bigint", third, "bigint");
+    }
+
+    private List<String> generateExpression(String expressionPattern, Long first, BigDecimal second, Long third)
+    {
+        return formatExpression(expressionPattern, first, "bigint", second, "decimal(1,0)", third, "bigint");
+    }
+
+    private List<String> generateExpression(String expressionPattern, BigDecimal first, Double second, BigDecimal third)
+    {
+        return formatExpression(expressionPattern, first, "decimal(1,0)", second, "double", third, "decimal(1,0)");
     }
 
     private List<String> formatExpression(String expressionPattern, Object value, String type)
@@ -1254,6 +1586,9 @@ public class TestExpressionCompiler
                 if (type.equals("varchar")) {
                     value = "'" + value + "'";
                 }
+                else if (type.equals("double")) {
+                    value = "CAST( " + value + " AS DOUBLE)";
+                }
                 unrolledValues.add(ImmutableSet.of(String.valueOf(value)));
             }
             else {
@@ -1271,9 +1606,20 @@ public class TestExpressionCompiler
         return expressions.build();
     }
 
+    private String formatDoubleToScientificNotation(Double value)
+    {
+        NumberFormat formatter = new DecimalFormat("0.##############E0");
+        return formatter.format(value);
+    }
+
     private void assertExecute(String expression, Type expectedType, Object expected)
     {
         addCallable(new AssertExecuteTask(functionAssertions, expression, expectedType, expected));
+    }
+
+    private void assertExecute(String expressions, SqlDecimal bigDecimal)
+    {
+        assertExecute(ImmutableList.of(expressions), bigDecimal);
     }
 
     private void addCallable(Callable<Void> callable)
@@ -1288,6 +1634,21 @@ public class TestExpressionCompiler
             catch (Exception e) {
                 throw Throwables.propagate(e);
             }
+        }
+    }
+
+    private void assertExecute(List<String> expressions, BigDecimal bigDecimal)
+    {
+        assertExecute(expressions, SqlDecimal.of(bigDecimal));
+    }
+
+    private void assertExecute(List<String> expressions, SqlDecimal sqlDecimal)
+    {
+        int precision = sqlDecimal == null ? 1 : sqlDecimal.getPrecision();
+        int scale = sqlDecimal == null ? 0 : sqlDecimal.getScale();
+        Type type = createDecimalType(precision, scale);
+        for (String expression : expressions) {
+            assertExecute(expression, type, sqlDecimal);
         }
     }
 

@@ -47,6 +47,10 @@ statement
     | CREATE (OR REPLACE)? VIEW qualifiedName AS query                 #createView
     | DROP VIEW (IF EXISTS)? qualifiedName                             #dropView
     | CALL qualifiedName '(' (callArgument (',' callArgument)*)? ')'   #call
+    | GRANT
+        (privilege (',' privilege)* | ALL PRIVILEGES)
+        ON (TABLE)? qualifiedName TO (grantee=identifier | PUBLIC)
+        (WITH GRANT OPTION)?                                           #grant
     | EXPLAIN ('(' explainOption (',' explainOption)* ')')? statement  #explain
     | SHOW TABLES ((FROM | IN) qualifiedName)? (LIKE pattern=STRING)?  #showTables
     | SHOW SCHEMAS ((FROM | IN) identifier)?                           #showSchemas
@@ -65,6 +69,11 @@ statement
         (WHERE booleanExpression)?
         (ORDER BY sortItem (',' sortItem)*)?
         (LIMIT limit=(INTEGER_VALUE | ALL))?                           #showPartitions
+    | PREPARE identifier FROM statement                                #prepare
+    | DEALLOCATE PREPARE identifier                                    #deallocate
+    | EXECUTE identifier (USING literal (',' literal)*)?               #execute
+    | DESCRIBE INPUT identifier                                        #describeInput
+    | DESCRIBE OUTPUT identifier                                       #describeOutput
     ;
 
 query
@@ -240,13 +249,8 @@ valueExpression
     ;
 
 primaryExpression
-    : NULL                                                                           #nullLiteral
-    | interval                                                                       #intervalLiteral
-    | identifier STRING                                                              #typeConstructor
-    | number                                                                         #numericLiteral
-    | booleanValue                                                                   #booleanLiteral
-    | STRING                                                                         #stringLiteral
-    | BINARY_LITERAL                                                                 #binaryLiteral
+    : literal                                                                        #literalExpression
+    | PARAMETER                                                                      #parameter
     | POSITION '(' valueExpression IN valueExpression ')'                            #position
     | '(' expression (',' expression)+ ')'                                           #rowConstructor
     | ROW '(' expression (',' expression)* ')'                                       #rowConstructor
@@ -272,6 +276,16 @@ primaryExpression
     | NORMALIZE '(' valueExpression (',' normalForm)? ')'                            #normalize
     | EXTRACT '(' identifier FROM valueExpression ')'                                #extract
     | '(' expression ')'                                                             #parenthesizedExpression
+    ;
+
+literal
+    : NULL                                                                           #nullLiteral
+    | interval                                                                       #intervalLiteral
+    | identifier STRING                                                              #typeConstructor
+    | number                                                                         #numericLiteral
+    | booleanValue                                                                   #booleanLiteral
+    | STRING                                                                         #stringLiteral
+    | BINARY_LITERAL                                                                 #binaryLiteral
     ;
 
 timeZoneSpecifier
@@ -361,6 +375,10 @@ callArgument
     | identifier '=>' expression    #namedArgument
     ;
 
+privilege
+    : SELECT | DELETE | INSERT | value=identifier
+    ;
+
 qualifiedName
     : identifier ('.' identifier)*
     ;
@@ -379,6 +397,7 @@ quotedIdentifier
 
 number
     : DECIMAL_VALUE  #decimalLiteral
+    | DOUBLE_VALUE   #doubleLiteral
     | INTEGER_VALUE  #integerLiteral
     ;
 
@@ -400,6 +419,7 @@ nonReserved
     | START | TRANSACTION | COMMIT | ROLLBACK | WORK | ISOLATION | LEVEL
     | SERIALIZABLE | REPEATABLE | COMMITTED | UNCOMMITTED | READ | WRITE | ONLY
     | CALL
+    | GRANT | PRIVILEGES | PUBLIC | OPTION
     ;
 
 normalForm
@@ -501,6 +521,10 @@ DELETE: 'DELETE';
 INTO: 'INTO';
 CONSTRAINT: 'CONSTRAINT';
 DESCRIBE: 'DESCRIBE';
+GRANT: 'GRANT';
+PRIVILEGES: 'PRIVILEGES';
+PUBLIC: 'PUBLIC';
+OPTION: 'OPTION';
 EXPLAIN: 'EXPLAIN';
 FORMAT: 'FORMAT';
 TYPE: 'TYPE';
@@ -555,6 +579,11 @@ READ: 'READ';
 WRITE: 'WRITE';
 ONLY: 'ONLY';
 CALL: 'CALL';
+PREPARE: 'PREPARE';
+DEALLOCATE: 'DEALLOCATE';
+EXECUTE: 'EXECUTE';
+INPUT: 'INPUT';
+OUTPUT: 'OUTPUT';
 
 NORMALIZE: 'NORMALIZE';
 NFD : 'NFD';
@@ -598,7 +627,10 @@ INTEGER_VALUE
 DECIMAL_VALUE
     : DIGIT+ '.' DIGIT*
     | '.' DIGIT+
-    | DIGIT+ ('.' DIGIT*)? EXPONENT
+    ;
+
+DOUBLE_VALUE
+    : DIGIT+ ('.' DIGIT*)? EXPONENT
     | '.' DIGIT+ EXPONENT
     ;
 
@@ -648,6 +680,10 @@ BRACKETED_COMMENT
 
 WS
     : [ \r\n\t]+ -> channel(HIDDEN)
+    ;
+
+PARAMETER
+    : '?'
     ;
 
 // Catch-all for anything we can't recognize.

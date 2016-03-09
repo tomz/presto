@@ -6,12 +6,15 @@ CREATE TABLE presto_test_types_textfile (
 , t_bigint BIGINT
 , t_float FLOAT
 , t_double DOUBLE
+, t_decimal_precision_8 DECIMAL(8,4)
+, t_decimal_precision_17 DECIMAL(17,8)
+, t_decimal_precision_18 DECIMAL(18,8)
+, t_decimal_precision_38 DECIMAL(38,16)
 , t_boolean BOOLEAN
 , t_timestamp TIMESTAMP
 , t_binary BINARY
 , t_date DATE
 , t_varchar VARCHAR(50)
-, t_char CHAR(25)
 , t_map MAP<STRING, STRING>
 , t_array_string ARRAY<STRING>
 , t_array_struct ARRAY<STRUCT<s_string: STRING, s_double:DOUBLE>>
@@ -29,12 +32,15 @@ SELECT
 , 4 + n + CASE WHEN n % 13 = 0 THEN NULL ELSE 0 END
 , 5.1 + n
 , 6.2 + n
+, CASE WHEN n % 43 = 0 THEN NULL ELSE 1000.0001BD + CAST(n AS DECIMAL) END
+, CASE WHEN n % 47 = 0 THEN NULL ELSE 100000000.00000001BD + CAST(n AS DECIMAL) END
+, CASE WHEN n % 49 = 0 THEN NULL ELSE 1000000000.00000001BD + CAST(n AS DECIMAL) END
+, CASE WHEN n % 51 = 0 THEN NULL ELSE 1000000000000000000000.0000000000000001BD + CAST(n AS DECIMAL) END
 , CASE n % 3 WHEN 0 THEN false WHEN 1 THEN true ELSE NULL END
 , CASE WHEN n % 17 = 0 THEN NULL ELSE '2011-05-06 07:08:09.1234567' END
 , CASE WHEN n % 23 = 0 THEN NULL ELSE CAST('test binary' AS BINARY) END
 , CASE WHEN n % 37 = 0 THEN NULL ELSE '2013-08-09' END
 , CASE n % 39 WHEN 0 THEN NULL WHEN 1 THEN '' ELSE 'test varchar' END
-, CASE n % 41 WHEN 0 THEN NULL WHEN 1 THEN '' ELSE 'test char' END
 , CASE WHEN n % 27 = 0 THEN NULL ELSE map('test key', 'test value') END
 , CASE WHEN n % 29 = 0 THEN NULL ELSE array('abc', 'xyz', 'data') END
 , CASE WHEN n % 31 = 0 THEN NULL ELSE
@@ -83,6 +89,8 @@ SELECT * FROM presto_test_types_textfile
 
 
 -- Parquet fails when trying to use complex nested types.
+-- Parquet is missing TIMESTAMP and BINARY.
+-- Empty strings are not padded correctly for CHAR(n) type.
 CREATE TABLE presto_test_types_parquet (
   t_string STRING
 , t_tinyint TINYINT
@@ -91,9 +99,14 @@ CREATE TABLE presto_test_types_parquet (
 , t_bigint BIGINT
 , t_float FLOAT
 , t_double DOUBLE
+, t_decimal_precision_8 DECIMAL(8,4)
+, t_decimal_precision_17 DECIMAL(17,8)
+, t_decimal_precision_18 DECIMAL(18,8)
+, t_decimal_precision_38 DECIMAL(38,16)
 , t_boolean BOOLEAN
 , t_timestamp TIMESTAMP
 , t_binary BINARY
+, t_varchar VARCHAR(50)
 , t_map MAP<STRING, STRING>
 , t_array_string ARRAY<STRING>
 , t_array_struct ARRAY<STRUCT<s_string: STRING, s_double:DOUBLE>>
@@ -110,9 +123,14 @@ SELECT
 , t_bigint
 , t_float
 , t_double
+, t_decimal_precision_8
+, t_decimal_precision_17
+, t_decimal_precision_18
+, t_decimal_precision_38
 , t_boolean
 , t_timestamp
 , t_binary
+, t_varchar
 , t_map
 , t_array_string
 , t_array_struct

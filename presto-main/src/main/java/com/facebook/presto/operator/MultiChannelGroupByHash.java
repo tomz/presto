@@ -70,6 +70,7 @@ public class MultiChannelGroupByHash
     private int mask;
     private long[] groupAddressByHash;
     private int[] groupIdsByHash;
+    private byte[] rawHashByHashPosition;
 
     private final LongBigArray groupAddressByGroupId;
 
@@ -126,6 +127,8 @@ public class MultiChannelGroupByHash
         mask = hashSize - 1;
         groupAddressByHash = new long[hashSize];
         Arrays.fill(groupAddressByHash, -1);
+
+        rawHashByHashPosition = new byte[hashSize];
 
         groupIdsByHash = new int[hashSize];
 
@@ -234,8 +237,7 @@ public class MultiChannelGroupByHash
 
         // look for a slot containing this key
         while (groupAddressByHash[hashPosition] != -1) {
-            long address = groupAddressByHash[hashPosition];
-            if (hashStrategy.positionEqualsRow(decodeSliceIndex(address), decodePosition(address), position, page, hashChannels)) {
+            if (positionEqualsCurrentRow(groupAddressByHash[hashPosition], hashPosition, position, page, (byte) rawHash, hashChannels)) {
                 // found an existing slot for this key
                 return true;
             }
@@ -260,8 +262,7 @@ public class MultiChannelGroupByHash
         // look for an empty slot or a slot containing this key
         int groupId = -1;
         while (groupAddressByHash[hashPosition] != -1) {
-            long address = groupAddressByHash[hashPosition];
-            if (positionEqualsCurrentRow(decodeSliceIndex(address), decodePosition(address), position, page)) {
+            if (positionEqualsCurrentRow(groupAddressByHash[hashPosition], hashPosition, position, page, (byte) rawHash, channels)) {
                 // found an existing slot for this key
                 groupId = groupIdsByHash[hashPosition];
 
@@ -299,6 +300,7 @@ public class MultiChannelGroupByHash
         int groupId = nextGroupId++;
 
         groupAddressByHash[hashPosition] = address;
+        rawHashByHashPosition[hashPosition] = (byte) rawHash;
         groupIdsByHash[hashPosition] = groupId;
         groupAddressByGroupId.set(groupId, address);
 
@@ -336,6 +338,7 @@ public class MultiChannelGroupByHash
 
         int newMask = newCapacity - 1;
         long[] newKey = new long[newCapacity];
+        byte[] rawHashes = new byte[newCapacity];
         Arrays.fill(newKey, -1);
         int[] newValue = new int[newCapacity];
 
@@ -349,14 +352,16 @@ public class MultiChannelGroupByHash
             // get the address for this slot
             long address = groupAddressByHash[oldIndex];
 
+            int rawHash = hashPosition(address);
             // find an empty slot for the address
-            int pos = getHashPosition(hashPosition(address), newMask);
+            int pos = getHashPosition(rawHash, newMask);
             while (newKey[pos] != -1) {
                 pos = (pos + 1) & newMask;
             }
 
             // record the mapping
             newKey[pos] = address;
+            rawHashes[pos] = (byte) rawHash;
             newValue[pos] = groupIdsByHash[oldIndex];
             oldIndex++;
         }
@@ -364,6 +369,7 @@ public class MultiChannelGroupByHash
         this.mask = newMask;
         this.maxFill = calculateMaxFill(newCapacity);
         this.groupAddressByHash = newKey;
+        this.rawHashByHashPosition = rawHashes;
         this.groupIdsByHash = newValue;
         groupAddressByGroupId.ensureCapacity(maxFill);
     }
@@ -383,9 +389,12 @@ public class MultiChannelGroupByHash
         return (int) channelBuilders.get(precomputedHashChannel.get()).get(sliceIndex).getLong(position, 0);
     }
 
-    private boolean positionEqualsCurrentRow(int sliceIndex, int slicePosition, int position, Page page)
+    private boolean positionEqualsCurrentRow(long address, int hashPosition, int position, Page page, byte rawHash, int[] hashChannels)
     {
-        return hashStrategy.positionEqualsRow(sliceIndex, slicePosition, position, page, channels);
+        if (rawHashByHashPosition[hashPosition] != rawHash) {
+            return false;
+        }
+        return hashStrategy.positionEqualsRow(decodeSliceIndex(address), decodePosition(address), position, page, hashChannels);
     }
 
     private static int getHashPosition(int rawHash, int mask)
