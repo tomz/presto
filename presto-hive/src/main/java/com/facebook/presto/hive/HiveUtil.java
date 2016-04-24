@@ -439,7 +439,7 @@ public final class HiveUtil
                 return NullableValue.of(DOUBLE, parseDouble(value));
             }
 
-            if (HIVE_STRING.equals(hiveType)) {
+            if (HIVE_STRING.equals(hiveType) || hiveType.toString().toLowerCase().startsWith("varchar")) {
                 if (isNull) {
                     return NullableValue.asNull(VARCHAR);
                 }
