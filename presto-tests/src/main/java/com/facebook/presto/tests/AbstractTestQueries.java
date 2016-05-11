@@ -571,14 +571,14 @@ public abstract class AbstractTestQueries
     public void testGroupByPartitioningColumn()
             throws Exception
     {
-        assertQuery("SELECT orderkey, count(*) FROM orders GROUP BY orderkey");
+        assertQuery("SELECT orderkey, count(*) FROM lineitem GROUP BY orderkey");
     }
 
     @Test
     public void testJoinPartitionedTable()
             throws Exception
     {
-        assertQuery("SELECT * FROM orders a JOIN orders b ON a.orderkey = b.orderkey");
+        assertQuery("SELECT * FROM lineitem a JOIN lineitem b ON a.orderkey = b.orderkey");
     }
 
     @Test
@@ -4872,6 +4872,14 @@ public abstract class AbstractTestQueries
                 "FROM lineitem " +
                 "GROUP BY linenumber " +
                 "HAVING min(orderkey) IN (SELECT orderkey FROM orders WHERE orderkey > 1)");
+        //
+        // constant literal versus a subquery
+        assertQuery("SELECT 10 in (SELECT orderkey FROM orders)");
+
+        // the same IN subquery used twice
+        assertQuery(
+                "SELECT * FROM (VALUES (1,1), (2,2), (3, 3)) t(x, y) WHERE (x+y in (VALUES 4, 5)) AND (x*y in (VALUES 4, 5))",
+                "VALUES (2,2)");
 
         // Throw in a bunch of IN subquery predicates
         assertQuery("" +
@@ -5073,6 +5081,7 @@ public abstract class AbstractTestQueries
                 "(SELECT min(orderkey) FROM orders)" +
                 "<" +
                 "(SELECT max(orderkey) FROM orders)");
+        assertQuery("SELECT (SELECT 1), (SELECT 2), (SELECT 3)");
 
         // distinct
         assertQuery("SELECT DISTINCT orderkey FROM lineitem " +

@@ -490,16 +490,18 @@ public class QueryStateMachine
 
         recordDoneStats();
 
+        // NOTE: this must be set before triggering the state change, so listeners
+        // can be observe the exception
         failureCause.compareAndSet(null, toFailure(throwable));
+
         boolean failed = queryState.setIf(FAILED, currentState -> !currentState.isDone());
         if (failed) {
             log.debug(throwable, "Query %s failed", queryId);
+            session.getTransactionId().ifPresent(autoCommit ? transactionManager::asyncAbort : transactionManager::fail);
         }
         else {
             log.debug(throwable, "Failure after query %s finished", queryId);
         }
-
-        session.getTransactionId().ifPresent(autoCommit ? transactionManager::asyncAbort : transactionManager::fail);
 
         return failed;
     }
