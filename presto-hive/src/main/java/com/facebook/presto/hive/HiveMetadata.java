@@ -479,9 +479,12 @@ public class HiveMetadata
         table.setPartitionKeys(partitionColumns);
         table.setSd(sd);
 
-        PrivilegeGrantInfo allPrivileges = new PrivilegeGrantInfo("all", 0, tableOwner, PrincipalType.USER, true);
+        PrivilegeGrantInfo selectPrivilege = new PrivilegeGrantInfo("select", 0, tableOwner, PrincipalType.USER, true);
+        PrivilegeGrantInfo insertPrivilege = new PrivilegeGrantInfo("insert", 0, tableOwner, PrincipalType.USER, true);
+        PrivilegeGrantInfo updatePrivilege = new PrivilegeGrantInfo("update", 0, tableOwner, PrincipalType.USER, true);
+        PrivilegeGrantInfo deletePrivilege = new PrivilegeGrantInfo("delete", 0, tableOwner, PrincipalType.USER, true);
         table.setPrivileges(new PrincipalPrivilegeSet(
-                ImmutableMap.of(tableOwner, ImmutableList.of(allPrivileges)),
+                ImmutableMap.of(tableOwner, ImmutableList.of(selectPrivilege, insertPrivilege, updatePrivilege, deletePrivilege)),
                 ImmutableMap.of(),
                 ImmutableMap.of()));
 
@@ -1116,9 +1119,13 @@ public class HiveMetadata
         table.setViewExpandedText("/* Presto View */");
         table.setSd(sd);
 
-        PrivilegeGrantInfo allPrivileges = new PrivilegeGrantInfo("all", 0, session.getUser(), PrincipalType.USER, true);
+        String tableOwner = session.getUser();
+        PrivilegeGrantInfo selectPrivilege = new PrivilegeGrantInfo("select", 0, tableOwner, PrincipalType.USER, true);
+        PrivilegeGrantInfo insertPrivilege = new PrivilegeGrantInfo("insert", 0, tableOwner, PrincipalType.USER, true);
+        PrivilegeGrantInfo updatePrivilege = new PrivilegeGrantInfo("update", 0, tableOwner, PrincipalType.USER, true);
+        PrivilegeGrantInfo deletePrivilege = new PrivilegeGrantInfo("delete", 0, tableOwner, PrincipalType.USER, true);
         table.setPrivileges(new PrincipalPrivilegeSet(
-                ImmutableMap.of(session.getUser(), ImmutableList.of(allPrivileges)),
+                ImmutableMap.of(tableOwner, ImmutableList.of(selectPrivilege, insertPrivilege, updatePrivilege, deletePrivilege)),
                 ImmutableMap.of(),
                 ImmutableMap.of()));
 
