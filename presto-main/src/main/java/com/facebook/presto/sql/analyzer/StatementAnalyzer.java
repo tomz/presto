@@ -69,7 +69,6 @@ import com.facebook.presto.sql.tree.FrameBound;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.GroupBy;
 import com.facebook.presto.sql.tree.GroupingElement;
-import com.facebook.presto.sql.tree.InPredicate;
 import com.facebook.presto.sql.tree.Insert;
 import com.facebook.presto.sql.tree.Intersect;
 import com.facebook.presto.sql.tree.Join;
@@ -140,6 +139,7 @@ import static com.facebook.presto.connector.informationSchema.InformationSchemaM
 import static com.facebook.presto.connector.informationSchema.InformationSchemaMetadata.TABLE_INTERNAL_PARTITIONS;
 import static com.facebook.presto.connector.informationSchema.InformationSchemaMetadata.TABLE_SCHEMATA;
 import static com.facebook.presto.connector.informationSchema.InformationSchemaMetadata.TABLE_TABLES;
+import static com.facebook.presto.execution.SqlQueryManager.unwrapExecuteStatement;
 import static com.facebook.presto.metadata.FunctionKind.AGGREGATE;
 import static com.facebook.presto.metadata.FunctionKind.APPROXIMATE_AGGREGATE;
 import static com.facebook.presto.metadata.FunctionKind.WINDOW;
@@ -903,11 +903,12 @@ class StatementAnalyzer
     private String getQueryPlan(Explain node, ExplainType.Type planType, ExplainFormat.Type planFormat)
             throws IllegalArgumentException
     {
+        Statement statement = unwrapExecuteStatement(node.getStatement(), sqlParser, session);
         switch (planFormat) {
             case GRAPHVIZ:
-                return queryExplainer.get().getGraphvizPlan(session, node.getStatement(), planType);
+                return queryExplainer.get().getGraphvizPlan(session, statement, planType);
             case TEXT:
-                return queryExplainer.get().getPlan(session, node.getStatement(), planType);
+                return queryExplainer.get().getPlan(session, statement, planType);
         }
         throw new IllegalArgumentException("Invalid Explain Format: " + planFormat.toString());
     }
@@ -1287,6 +1288,8 @@ class StatementAnalyzer
                 ExpressionAnalysis rightExpressionAnalysis = analyzeExpression(rightExpression, right, context);
                 checkState(leftExpressionAnalysis.getSubqueryInPredicates().isEmpty(), "INVARIANT");
                 checkState(rightExpressionAnalysis.getSubqueryInPredicates().isEmpty(), "INVARIANT");
+                checkState(leftExpressionAnalysis.getScalarSubqueries().isEmpty(), "INVARIANT");
+                checkState(rightExpressionAnalysis.getScalarSubqueries().isEmpty(), "INVARIANT");
 
                 addCoercionForJoinCriteria(node, leftExpression, rightExpression);
                 expressions.add(new ComparisonExpression(EQUAL, leftExpression, rightExpression));
@@ -1331,12 +1334,31 @@ class StatementAnalyzer
             analysis.addCoercions(analyzer.getExpressionCoercions(), analyzer.getTypeOnlyCoercions());
 
             Set<Expression> postJoinConjuncts = new HashSet<>();
-            final Set<InPredicate> leftJoinInPredicates = new HashSet<>();
-            final Set<InPredicate> rightJoinInPredicates = new HashSet<>();
+            final Set<Expression> leftExpressions = new HashSet<>();
+            final Set<Expression> rightExpressions = new HashSet<>();
 
             for (Expression conjunct : ExpressionUtils.extractConjuncts((Expression) optimizedExpression)) {
                 conjunct = ExpressionUtils.normalize(conjunct);
-                if (conjunct instanceof ComparisonExpression) {
+
+                // in case of outer join we look for case when conjunct can be resolved using only inner side symbols.
+                // In such case it will be pushed to filter node on inner side of join by RelationPlanner
+                if (node.getType() == Join.Type.RIGHT) {
+                    Set<QualifiedName> names = DependencyExtractor.extractNames(conjunct, analyzer.getColumnReferences());
+                    if (names.stream().allMatch(left.canResolvePredicate())) {
+                        analyzeExpression(conjunct, left, context);
+                        continue;
+                    }
+                }
+                if (node.getType() == Join.Type.LEFT) {
+                    Set<QualifiedName> names = DependencyExtractor.extractNames(conjunct, analyzer.getColumnReferences());
+                    if (names.stream().allMatch(right.canResolvePredicate())) {
+                        analyzeExpression(conjunct, right, context);
+                        continue;
+                    }
+                }
+
+                if (conjunct instanceof ComparisonExpression
+                        && (((ComparisonExpression) conjunct).getType() == EQUAL || node.getType() == Join.Type.INNER)) {
                     Expression conjunctFirst = ((ComparisonExpression) conjunct).getLeft();
                     Expression conjunctSecond = ((ComparisonExpression) conjunct).getRight();
                     Set<QualifiedName> firstDependencies = DependencyExtractor.extractNames(conjunctFirst, analyzer.getColumnReferences());
@@ -1358,8 +1380,10 @@ class StatementAnalyzer
                     if (rightExpression != null) {
                         ExpressionAnalysis leftExpressionAnalysis = analyzeExpression(leftExpression, left, context);
                         ExpressionAnalysis rightExpressionAnalysis = analyzeExpression(rightExpression, right, context);
-                        leftJoinInPredicates.addAll(leftExpressionAnalysis.getSubqueryInPredicates());
-                        rightJoinInPredicates.addAll(rightExpressionAnalysis.getSubqueryInPredicates());
+                        leftExpressions.add(leftExpression);
+                        rightExpressions.add(rightExpression);
+                        analysis.recordSubqueries(node, leftExpressionAnalysis);
+                        analysis.recordSubqueries(node, rightExpressionAnalysis);
                         addCoercionForJoinCriteria(node, leftExpression, rightExpression);
                     }
                     else {
@@ -1374,9 +1398,8 @@ class StatementAnalyzer
                     postJoinConjuncts.add(conjunct);
                 }
             }
-            ExpressionAnalysis postJoinPredicatesConjunctsAnalysis = analyzeExpression(ExpressionUtils.combineConjuncts(postJoinConjuncts), output, context);
-            analysis.recordSubqueries(node, postJoinPredicatesConjunctsAnalysis);
-            analysis.addJoinInPredicates(node, new Analysis.JoinInPredicates(leftJoinInPredicates, rightJoinInPredicates));
+            Expression postJoinPredicate = ExpressionUtils.combineConjuncts(postJoinConjuncts);
+            analysis.recordSubqueries(node, analyzeExpression(postJoinPredicate, output, context));
             analysis.setJoinCriteria(node, (Expression) optimizedExpression);
         }
         else {
@@ -1389,8 +1412,8 @@ class StatementAnalyzer
 
     private void addCoercionForJoinCriteria(Join node, Expression leftExpression, Expression rightExpression)
     {
-        Type leftType = analysis.getType(leftExpression);
-        Type rightType = analysis.getType(rightExpression);
+        Type leftType = analysis.getTypeWithCoercions(leftExpression);
+        Type rightType = analysis.getTypeWithCoercions(rightExpression);
         Optional<Type> superType = metadata.getTypeManager().getCommonSuperType(leftType, rightType);
         if (!superType.isPresent()) {
             throw new SemanticException(TYPE_MISMATCH, node, "Join criteria has incompatible types: %s, %s", leftType.getDisplayName(), rightType.getDisplayName());

@@ -95,3 +95,11 @@ Array Functions
 
     Subsets array ``x`` starting from index ``start`` (or starting from the end
     if ``start`` is negative) with a length of ``length``.
+
+.. function:: zip(array1, array2[, ...]) -> array<row>
+
+    Merges the given arrays, element-wise, into a single array of rows. The M-th element of
+    the N-th argument will be the N-th field of the M-th output element.
+    If the arguments have an uneven length, missing values are filled with ``NULL``. ::
+
+        SELECT zip(ARRAY[1, 2], ARRAY['1b', null, '3b']); => [ROW(1, '1b'), ROW(2, null), ROW(null, '3b')]

@@ -18,8 +18,7 @@ import com.facebook.presto.metadata.Signature;
 import com.facebook.presto.spi.block.SortOrder;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.planner.DeterminismEvaluator;
-import com.facebook.presto.sql.planner.PartitionFunctionBinding;
-import com.facebook.presto.sql.planner.PartitionFunctionBinding.PartitionFunctionArgumentBinding;
+import com.facebook.presto.sql.planner.PartitioningScheme;
 import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
@@ -163,7 +162,12 @@ public class UnaliasSymbolReferences
                     .map(this::canonicalize)
                     .collect(Collectors.toList());
 
-            return new GroupIdNode(node.getId(), source, canonicalize(node.getInputSymbols()), groupingSetsSymbols, canonicalize(node.getGroupIdSymbol()));
+            ImmutableMap.Builder<Symbol, Symbol> newPassthroughMap = ImmutableMap.builder();
+            for (Symbol inputSymbol : node.getIdentityMappings().keySet()) {
+                newPassthroughMap.put(canonicalize(inputSymbol), canonicalize(node.getIdentityMappings().get(inputSymbol)));
+            }
+
+            return new GroupIdNode(node.getId(), source, groupingSetsSymbols, newPassthroughMap.build(), canonicalize(node.getGroupIdSymbol()));
         }
 
         @Override
@@ -219,10 +223,11 @@ public class UnaliasSymbolReferences
             return new WindowNode(
                     node.getId(),
                     source,
-                    canonicalizeAndDistinct(node.getPartitionBy()),
-                    canonicalizeAndDistinct(node.getOrderBy()),
-                    orderings.build(),
-                    frame,
+                    new WindowNode.Specification(
+                            canonicalizeAndDistinct(node.getPartitionBy()),
+                            canonicalizeAndDistinct(node.getOrderBy()),
+                            orderings.build(),
+                            frame),
                     functionCalls.build(),
                     functionInfos.build(),
                     canonicalize(node.getHashSymbol()),
@@ -271,15 +276,14 @@ public class UnaliasSymbolReferences
                 }
             }
 
-            PartitionFunctionBinding partitionFunction = new PartitionFunctionBinding(
-                    node.getPartitionFunction().getPartitioningHandle(),
+            PartitioningScheme partitioningScheme = new PartitioningScheme(
+                    node.getPartitioningScheme().getPartitioning().translate(this::canonicalize),
                     outputs.build(),
-                    canonicalizePartitionFunctionArgument(node.getPartitionFunction().getPartitionFunctionArguments()),
-                    canonicalize(node.getPartitionFunction().getHashColumn()),
-                    node.getPartitionFunction().isReplicateNulls(),
-                    node.getPartitionFunction().getBucketToPartition());
+                    canonicalize(node.getPartitioningScheme().getHashColumn()),
+                    node.getPartitioningScheme().isReplicateNulls(),
+                    node.getPartitioningScheme().getBucketToPartition());
 
-            return new ExchangeNode(node.getId(), node.getType(), node.getScope(), partitionFunction, sources, inputs);
+            return new ExchangeNode(node.getId(), node.getType(), node.getScope(), partitioningScheme, sources, inputs);
         }
 
         @Override
@@ -465,7 +469,7 @@ public class UnaliasSymbolReferences
             PlanNode left = context.rewrite(node.getLeft());
             PlanNode right = context.rewrite(node.getRight());
 
-            return new JoinNode(node.getId(), node.getType(), left, right, canonicalizeJoinCriteria(node.getCriteria()), canonicalize(node.getLeftHashSymbol()), canonicalize(node.getRightHashSymbol()));
+            return new JoinNode(node.getId(), node.getType(), left, right, canonicalizeJoinCriteria(node.getCriteria()), node.getFilter().map(this::canonicalize), canonicalize(node.getLeftHashSymbol()), canonicalize(node.getRightHashSymbol()));
         }
 
         @Override
@@ -531,7 +535,7 @@ public class UnaliasSymbolReferences
                     node.getColumnNames(),
                     node.getOutputSymbols(),
                     canonicalize(node.getSampleWeightSymbol()),
-                    node.getPartitionFunction().map(this::canonicalizePartitionFunctionBinding));
+                    node.getPartitioningScheme().map(this::canonicalizePartitionFunctionBinding));
         }
 
         @Override
@@ -603,13 +607,6 @@ public class UnaliasSymbolReferences
                     .collect(toImmutableSet());
         }
 
-        private List<PartitionFunctionArgumentBinding> canonicalizePartitionFunctionArgument(List<PartitionFunctionArgumentBinding> arguments)
-        {
-            return arguments.stream()
-                    .map(argument -> argument.isConstant() ? argument : new PartitionFunctionArgumentBinding(canonicalize(argument.getColumn())))
-                    .collect(toImmutableList());
-        }
-
         private List<JoinNode.EquiJoinClause> canonicalizeJoinCriteria(List<JoinNode.EquiJoinClause> criteria)
         {
             ImmutableList.Builder<JoinNode.EquiJoinClause> builder = ImmutableList.builder();
@@ -639,15 +636,14 @@ public class UnaliasSymbolReferences
             return builder.build();
         }
 
-        private PartitionFunctionBinding canonicalizePartitionFunctionBinding(PartitionFunctionBinding function)
+        private PartitioningScheme canonicalizePartitionFunctionBinding(PartitioningScheme scheme)
         {
-            return new PartitionFunctionBinding(
-                    function.getPartitioningHandle(),
-                    canonicalize(function.getOutputLayout()),
-                    canonicalizePartitionFunctionArgument(function.getPartitionFunctionArguments()),
-                    canonicalize(function.getHashColumn()),
-                    function.isReplicateNulls(),
-                    function.getBucketToPartition());
+            return new PartitioningScheme(
+                    scheme.getPartitioning().translate(this::canonicalize),
+                    canonicalize(scheme.getOutputLayout()),
+                    canonicalize(scheme.getHashColumn()),
+                    scheme.isReplicateNulls(),
+                    scheme.getBucketToPartition());
         }
     }
 }

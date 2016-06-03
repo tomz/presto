@@ -17,11 +17,14 @@ import com.facebook.presto.operator.scalar.AbstractTestFunctions;
 import org.testng.annotations.Test;
 
 import static com.facebook.presto.spi.StandardErrorCode.DIVISION_BY_ZERO;
+import static com.facebook.presto.spi.StandardErrorCode.INVALID_CAST_ARGUMENT;
 import static com.facebook.presto.spi.StandardErrorCode.NUMERIC_VALUE_OUT_OF_RANGE;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.IntegerType.INTEGER;
+import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
+import static com.facebook.presto.spi.type.TinyintType.TINYINT;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 
 public class TestIntegerOperators
@@ -50,6 +53,7 @@ public class TestIntegerOperators
     {
         assertFunction("INTEGER'-37'", INTEGER, -37);
         assertFunction("INTEGER'-17'", INTEGER, -17);
+        assertInvalidFunction("INTEGER'-" + Integer.MIN_VALUE + "'", INVALID_CAST_ARGUMENT);
     }
 
     @Test
@@ -199,6 +203,22 @@ public class TestIntegerOperators
     {
         assertFunction("cast(INTEGER'37' as bigint)", BIGINT, 37L);
         assertFunction("cast(INTEGER'17' as bigint)", BIGINT, 17L);
+    }
+
+    @Test
+    public void testCastToSmallint()
+            throws Exception
+    {
+        assertFunction("cast(INTEGER'37' as smallint)", SMALLINT, (short) 37);
+        assertFunction("cast(INTEGER'17' as smallint)", SMALLINT, (short) 17);
+    }
+
+    @Test
+    public void testCastToTinyint()
+            throws Exception
+    {
+        assertFunction("cast(INTEGER'37' as tinyint)", TINYINT, (byte) 37);
+        assertFunction("cast(INTEGER'17' as tinyint)", TINYINT, (byte) 17);
     }
 
     @Test

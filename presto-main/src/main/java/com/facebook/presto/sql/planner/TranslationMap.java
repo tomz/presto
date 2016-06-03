@@ -62,6 +62,11 @@ class TranslationMap
         return rewriteBase;
     }
 
+    public Analysis getAnalysis()
+    {
+        return analysis;
+    }
+
     public void setFieldMappings(List<Symbol> symbols)
     {
         checkArgument(symbols.size() == fieldSymbols.length, "size of symbols list (%s) doesn't match number of expected fields (%s)", symbols.size(), fieldSymbols.length);
@@ -129,6 +134,17 @@ class TranslationMap
 
         // also update the field mappings if this expression is a field reference
         analysis.getFieldIndex(expression).ifPresent(index -> fieldSymbols[index] = symbol);
+    }
+
+    public boolean containsSymbol(Expression expression)
+    {
+        if (expression instanceof FieldReference) {
+            int field = ((FieldReference) expression).getFieldIndex();
+            return fieldSymbols[field] != null;
+        }
+
+        Expression translated = translateNamesToSymbols(expression);
+        return expressionToSymbols.containsKey(translated);
     }
 
     public Symbol get(Expression expression)

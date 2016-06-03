@@ -21,6 +21,7 @@ import com.facebook.presto.spi.block.SortOrder;
 import com.facebook.presto.spi.predicate.Domain;
 import com.facebook.presto.spi.predicate.TupleDomain;
 import com.facebook.presto.spi.type.Type;
+import com.facebook.presto.spi.type.TypeSignature;
 import com.facebook.presto.sql.planner.plan.AggregationNode;
 import com.facebook.presto.sql.planner.plan.FilterNode;
 import com.facebook.presto.sql.planner.plan.JoinNode;
@@ -282,12 +283,13 @@ public class TestEffectivePredicateExtractor
                                 equals(AE, BE),
                                 equals(BE, CE),
                                 lessThan(CE, bigintLiteral(10)))),
-                ImmutableList.of(A),
-                ImmutableList.of(A),
-                ImmutableMap.of(A, SortOrder.ASC_NULLS_LAST),
-                new WindowNode.Frame(WindowFrame.Type.RANGE,
-                        FrameBound.Type.UNBOUNDED_PRECEDING, Optional.empty(),
-                        FrameBound.Type.CURRENT_ROW, Optional.empty()),
+                new WindowNode.Specification(
+                        ImmutableList.of(A),
+                        ImmutableList.of(A),
+                        ImmutableMap.of(A, SortOrder.ASC_NULLS_LAST),
+                        new WindowNode.Frame(WindowFrame.Type.RANGE,
+                                FrameBound.Type.UNBOUNDED_PRECEDING, Optional.empty(),
+                                FrameBound.Type.CURRENT_ROW, Optional.empty())),
                 ImmutableMap.<Symbol, FunctionCall>of(),
                 ImmutableMap.<Symbol, Signature>of(),
                 Optional.empty(),
@@ -432,6 +434,7 @@ public class TestEffectivePredicateExtractor
                                 lessThan(FE, bigintLiteral(100)))),
                 criteria,
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
 
         Expression effectivePredicate = EffectivePredicateExtractor.extract(node, TYPES);
@@ -489,6 +492,7 @@ public class TestEffectivePredicateExtractor
                                 lessThan(FE, bigintLiteral(100)))),
                 criteria,
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
 
         Expression effectivePredicate = EffectivePredicateExtractor.extract(node, TYPES);
@@ -539,6 +543,7 @@ public class TestEffectivePredicateExtractor
                                 lessThan(CE, bigintLiteral(10)))),
                 filter(rightScan, FALSE_LITERAL),
                 criteria,
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
 
@@ -594,6 +599,7 @@ public class TestEffectivePredicateExtractor
                                 lessThan(FE, bigintLiteral(100)))),
                 criteria,
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
 
         Expression effectivePredicate = EffectivePredicateExtractor.extract(node, TYPES);
@@ -644,6 +650,7 @@ public class TestEffectivePredicateExtractor
                                 equals(DE, EE),
                                 lessThan(FE, bigintLiteral(100)))),
                 criteria,
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
 
@@ -724,7 +731,7 @@ public class TestEffectivePredicateExtractor
 
     private static Signature fakeFunctionHandle(String name, FunctionKind kind)
     {
-        return new Signature(name, kind, UnknownType.NAME, ImmutableList.<String>of());
+        return new Signature(name, kind, TypeSignature.parseTypeSignature(UnknownType.NAME), ImmutableList.<TypeSignature>of());
     }
 
     private Set<Expression> normalizeConjuncts(Expression... conjuncts)

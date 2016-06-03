@@ -275,13 +275,13 @@ public class PlanPrinter
                             stageStats.get().getOutputDataSize()));
         }
 
-        PartitionFunctionBinding partitionFunction = fragment.getPartitionFunction();
+        PartitioningScheme partitioningScheme = fragment.getPartitioningScheme();
         builder.append(indentString(1))
                 .append(format("Output layout: [%s]\n",
-                        Joiner.on(", ").join(partitionFunction.getOutputLayout())));
+                        Joiner.on(", ").join(partitioningScheme.getOutputLayout())));
 
-        boolean replicateNulls = partitionFunction.isReplicateNulls();
-        List<String> arguments = partitionFunction.getPartitionFunctionArguments().stream()
+        boolean replicateNulls = partitioningScheme.isReplicateNulls();
+        List<String> arguments = partitioningScheme.getPartitioning().getArguments().stream()
                 .map(argument -> {
                         if (argument.isConstant()) {
                             NullableValue constant = argument.getConstant();
@@ -294,12 +294,12 @@ public class PlanPrinter
         builder.append(indentString(1));
         if (replicateNulls) {
             builder.append(format("Output partitioning: %s (replicate nulls) [%s]\n",
-                    partitionFunction.getPartitioningHandle(),
+                    partitioningScheme.getPartitioning().getHandle(),
                     Joiner.on(", ").join(arguments)));
         }
         else {
             builder.append(format("Output partitioning: %s [%s]\n",
-                    partitionFunction.getPartitioningHandle(),
+                    partitioningScheme.getPartitioning().getHandle(),
                     Joiner.on(", ").join(arguments)));
         }
 
@@ -323,7 +323,7 @@ public class PlanPrinter
                 types,
                 SINGLE_DISTRIBUTION,
                 ImmutableList.of(plan.getId()),
-                new PartitionFunctionBinding(SINGLE_DISTRIBUTION, plan.getOutputSymbols(), ImmutableList.of()));
+                new PartitioningScheme(Partitioning.create(SINGLE_DISTRIBUTION, ImmutableList.of()), plan.getOutputSymbols()));
         return GraphvizPrinter.printLogical(ImmutableList.of(fragment));
     }
 
@@ -414,6 +414,7 @@ public class PlanPrinter
                         new QualifiedNameReference(clause.getLeft().toQualifiedName()),
                         new QualifiedNameReference(clause.getRight().toQualifiedName())));
             }
+            node.getFilter().ifPresent(expression -> joinExpressions.add(expression));
 
             print(indent, "- %s[%s] => [%s]", node.getType().getJoinLabel(), Joiner.on(" AND ").join(joinExpressions), formatOutputs(node.getOutputSymbols()));
             printStats(indent + 2, node.getId());
@@ -808,15 +809,17 @@ public class PlanPrinter
         public Void visitExchange(ExchangeNode node, Integer indent)
         {
             if (node.getScope() == Scope.LOCAL) {
-                print(indent, "- LocalExchange[%s] (%s) => %s",
-                        node.getPartitionFunction().getPartitioningHandle(),
-                        Joiner.on(", ").join(node.getPartitionFunction().getPartitionFunctionArguments()),
+                print(indent, "- LocalExchange[%s%s] (%s) => %s",
+                        node.getPartitioningScheme().getPartitioning().getHandle(),
+                        node.getPartitioningScheme().isReplicateNulls() ? " - REPLICATE NULLS" : "",
+                        Joiner.on(", ").join(node.getPartitioningScheme().getPartitioning().getArguments()),
                         formatOutputs(node.getOutputSymbols()));
             }
             else {
-                print(indent, "- %sExchange[%s] => %s",
+                print(indent, "- %sExchange[%s%s] => %s",
                         UPPER_UNDERSCORE.to(CaseFormat.UPPER_CAMEL, node.getScope().toString()),
                         node.getType(),
+                        node.getPartitioningScheme().isReplicateNulls() ? " - REPLICATE NULLS" : "",
                         formatOutputs(node.getOutputSymbols()));
             }
             printStats(indent + 2, node.getId());

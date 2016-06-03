@@ -22,6 +22,7 @@ import com.facebook.presto.memory.ClusterMemoryManager;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.sql.parser.ParsingException;
 import com.facebook.presto.sql.parser.SqlParser;
+import com.facebook.presto.sql.tree.Execute;
 import com.facebook.presto.sql.tree.Explain;
 import com.facebook.presto.sql.tree.Statement;
 import com.facebook.presto.transaction.TransactionManager;
@@ -278,7 +279,7 @@ public class SqlQueryManager
         QueryExecution queryExecution;
         Statement statement;
         try {
-            statement = sqlParser.createStatement(query);
+            statement = unwrapExecuteStatement(sqlParser.createStatement(query), sqlParser, session);
             QueryExecutionFactory<?> queryExecutionFactory = executionFactories.get(statement.getClass());
             if (queryExecutionFactory == null) {
                 throw new PrestoException(NOT_SUPPORTED, "Unsupported statement type: " + statement.getClass().getSimpleName());
@@ -331,14 +332,26 @@ public class SqlQueryManager
             }
         });
 
+        addStatsListener(queryExecution);
+
         queries.put(queryId, queryExecution);
 
         // start the query in the background
-        if (!queueManager.submit(statement, queryExecution, queryExecutor, stats)) {
+        if (!queueManager.submit(statement, queryExecution, queryExecutor)) {
             queryExecution.fail(new PrestoException(QUERY_QUEUE_FULL, "Too many queued queries!"));
         }
 
         return queryInfo;
+    }
+
+    public static Statement unwrapExecuteStatement(Statement statement, SqlParser sqlParser, Session session)
+    {
+        if ((!(statement instanceof Execute))) {
+            return statement;
+        }
+
+        String sql = session.getPreparedStatementFromExecute((Execute) statement);
+        return sqlParser.createStatement(sql);
     }
 
     @Override
@@ -367,6 +380,7 @@ public class SqlQueryManager
         }
     }
 
+    @Override
     @Managed
     @Flatten
     public SqlQueryManagerStats getStats()
@@ -483,6 +497,30 @@ public class SqlQueryManager
         DateTime lastHeartbeat = query.getQueryInfo().getQueryStats().getLastHeartbeat();
 
         return lastHeartbeat != null && lastHeartbeat.isBefore(oldestAllowedHeartbeat);
+    }
+
+    private void addStatsListener(QueryExecution queryExecution)
+    {
+        AtomicBoolean started = new AtomicBoolean();
+        queryExecution.addStateChangeListener(newValue -> {
+            if (newValue == RUNNING && started.compareAndSet(false, true)) {
+                stats.queryStarted();
+            }
+        });
+        // Need to do this check in case the state changed before we added the previous state change listener
+        if (queryExecution.getState() == RUNNING && started.compareAndSet(false, true)) {
+            stats.queryStarted();
+        }
+        AtomicBoolean stopped = new AtomicBoolean();
+        queryExecution.addStateChangeListener(newValue -> {
+            if (newValue.isDone() && stopped.compareAndSet(false, true) && started.get()) {
+                stats.queryStopped();
+            }
+        });
+        // Need to do this check in case the state changed before we added the previous state change listener
+        if (queryExecution.getState().isDone() && stopped.compareAndSet(false, true) && started.get()) {
+            stats.queryStopped();
+        }
     }
 
     /**

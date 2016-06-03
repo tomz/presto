@@ -26,7 +26,6 @@ import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.analyzer.Analysis;
 import com.facebook.presto.sql.analyzer.Field;
 import com.facebook.presto.sql.analyzer.RelationType;
-import com.facebook.presto.sql.planner.PartitionFunctionBinding.PartitionFunctionArgumentBinding;
 import com.facebook.presto.sql.planner.optimizations.PlanOptimizer;
 import com.facebook.presto.sql.planner.plan.DeleteNode;
 import com.facebook.presto.sql.planner.plan.ExplainAnalyzeNode;
@@ -249,26 +248,23 @@ public class LogicalPlanner
 
         List<Symbol> symbols = plan.getOutputSymbols();
 
-        Optional<PartitionFunctionBinding> partitionFunctionBinding = Optional.empty();
+        Optional<PartitioningScheme> partitioningScheme = Optional.empty();
         if (writeTableLayout.isPresent()) {
-            List<PartitionFunctionArgumentBinding> partitionFunctionArguments = new ArrayList<>();
+            List<Symbol> partitionFunctionArguments = new ArrayList<>();
             writeTableLayout.get().getPartitionColumns().stream()
                     .mapToInt(columnNames::indexOf)
                     .mapToObj(symbols::get)
-                    .map(PartitionFunctionArgumentBinding::new)
                     .forEach(partitionFunctionArguments::add);
             plan.getSampleWeight()
-                    .map(PartitionFunctionArgumentBinding::new)
                     .ifPresent(partitionFunctionArguments::add);
 
             List<Symbol> outputLayout = new ArrayList<>(symbols);
             plan.getSampleWeight()
                     .ifPresent(outputLayout::add);
 
-            partitionFunctionBinding = Optional.of(new PartitionFunctionBinding(
-                    writeTableLayout.get().getPartitioning(),
-                    outputLayout,
-                    partitionFunctionArguments));
+            partitioningScheme = Optional.of(new PartitioningScheme(
+                    Partitioning.create(writeTableLayout.get().getPartitioning(), partitionFunctionArguments),
+                    outputLayout));
         }
 
         PlanNode writerNode = new TableWriterNode(
@@ -279,7 +275,7 @@ public class LogicalPlanner
                 columnNames,
                 writerOutputs,
                 plan.getSampleWeight(),
-                partitionFunctionBinding);
+                partitioningScheme);
 
         List<Symbol> outputs = ImmutableList.of(symbolAllocator.newSymbol("rows", BIGINT));
         TableFinishNode commitNode = new TableFinishNode(

@@ -20,7 +20,7 @@ import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.LocalProperty;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.parser.SqlParser;
-import com.facebook.presto.sql.planner.PartitionFunctionBinding.PartitionFunctionArgumentBinding;
+import com.facebook.presto.sql.planner.Partitioning.ArgumentBinding;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.plan.AggregationNode;
 import com.facebook.presto.sql.planner.plan.DeleteNode;
@@ -105,7 +105,7 @@ final class StreamPropertyDerivations
         // properties.otherActualProperties will never be null here because the only way
         // an external caller should obtain StreamProperties is from this method, and the
         // last line of this method assures otherActualProperties is set.
-        ActualProperties otherProperties = PropertyDerivations.deriveProperties(
+        ActualProperties otherProperties = PropertyDerivations.streamBackdoorDeriveProperties(
                 node,
                 inputProperties.stream()
                         .map(properties -> properties.otherActualProperties)
@@ -248,14 +248,14 @@ final class StreamPropertyDerivations
                 case GATHER:
                     return StreamProperties.singleStream();
                 case REPARTITION:
-                    if (node.getPartitionFunction().getPartitioningHandle().equals(FIXED_RANDOM_DISTRIBUTION)) {
+                    if (node.getPartitioningScheme().getPartitioning().getHandle().equals(FIXED_RANDOM_DISTRIBUTION)) {
                         return new StreamProperties(FIXED, false, Optional.empty(), false);
                     }
                     return new StreamProperties(
                             FIXED,
                             true,
-                            Optional.of(node.getPartitionFunction().getPartitionFunctionArguments().stream()
-                                    .map(PartitionFunctionArgumentBinding::getColumn)
+                            Optional.of(node.getPartitioningScheme().getPartitioning().getArguments().stream()
+                                    .map(ArgumentBinding::getColumn)
                                     .collect(toImmutableList())), false);
                 case REPLICATE:
                     return new StreamProperties(MULTIPLE, false, Optional.empty(), false);

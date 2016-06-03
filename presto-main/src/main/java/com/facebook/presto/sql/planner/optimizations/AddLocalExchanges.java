@@ -23,8 +23,8 @@ import com.facebook.presto.spi.LocalProperty;
 import com.facebook.presto.spi.SortingProperty;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.parser.SqlParser;
-import com.facebook.presto.sql.planner.PartitionFunctionBinding;
-import com.facebook.presto.sql.planner.PartitionFunctionBinding.PartitionFunctionArgumentBinding;
+import com.facebook.presto.sql.planner.Partitioning;
+import com.facebook.presto.sql.planner.PartitioningScheme;
 import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
@@ -373,10 +373,7 @@ public class AddLocalExchanges
             WindowNode result = new WindowNode(
                     node.getId(),
                     child.getNode(),
-                    node.getPartitionBy(),
-                    node.getOrderBy(),
-                    node.getOrderings(),
-                    node.getFrame(),
+                    node.getSpecification(),
                     node.getWindowFunctions(),
                     node.getSignatures(),
                     node.getHashSymbol(),
@@ -473,7 +470,7 @@ public class AddLocalExchanges
                         idAllocator.getNextId(),
                         GATHER,
                         LOCAL,
-                        new PartitionFunctionBinding(SINGLE_DISTRIBUTION, node.getOutputSymbols(), ImmutableList.of()),
+                        new PartitioningScheme(Partitioning.create(SINGLE_DISTRIBUTION, ImmutableList.of()), node.getOutputSymbols()),
                         sources,
                         inputLayouts);
                 return deriveProperties(exchangeNode, inputProperties);
@@ -485,12 +482,9 @@ public class AddLocalExchanges
                         idAllocator.getNextId(),
                         REPARTITION,
                         LOCAL,
-                        new PartitionFunctionBinding(
-                                FIXED_HASH_DISTRIBUTION,
+                        new PartitioningScheme(
+                                Partitioning.create(FIXED_HASH_DISTRIBUTION, preferredPartitionColumns.get()),
                                 node.getOutputSymbols(),
-                                preferredPartitionColumns.get().stream()
-                                        .map(PartitionFunctionArgumentBinding::new)
-                                        .collect(toImmutableList()),
                                 Optional.empty()),
                         sources,
                         inputLayouts);
@@ -502,7 +496,7 @@ public class AddLocalExchanges
                     idAllocator.getNextId(),
                     REPARTITION,
                     LOCAL,
-                    new PartitionFunctionBinding(FIXED_RANDOM_DISTRIBUTION, node.getOutputSymbols(), ImmutableList.of()),
+                    new PartitioningScheme(Partitioning.create(FIXED_RANDOM_DISTRIBUTION, ImmutableList.of()), node.getOutputSymbols()),
                     sources,
                     inputLayouts);
             ExchangeNode exchangeNode = result;
@@ -545,7 +539,7 @@ public class AddLocalExchanges
                     parentPreferences.constrainTo(node.getSource().getOutputSymbols()).withDefaultParallelism(session));
 
             // this filter source consumes the input completely, so we do not pass through parent preferences
-            PlanWithProperties filteringSource = planAndEnforce(node.getFilteringSource(), singleStream(), defaultParallelism(session));
+            PlanWithProperties filteringSource = planAndEnforce(node.getFilteringSource(), singleStream(), singleStream());
 
             return rebaseAndDeriveProperties(node, ImmutableList.of(source, filteringSource));
         }
@@ -618,7 +612,7 @@ public class AddLocalExchanges
                         idAllocator.getNextId(),
                         LOCAL,
                         planWithProperties.getNode(),
-                        new PartitionFunctionBinding(FIXED_RANDOM_DISTRIBUTION, planWithProperties.getNode().getOutputSymbols(), ImmutableList.of()));
+                        new PartitioningScheme(Partitioning.create(FIXED_RANDOM_DISTRIBUTION, ImmutableList.of()), planWithProperties.getNode().getOutputSymbols()));
 
                 return deriveProperties(exchangeNode, planWithProperties.getProperties());
             }

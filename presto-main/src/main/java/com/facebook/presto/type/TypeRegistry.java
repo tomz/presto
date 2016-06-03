@@ -45,20 +45,23 @@ import static com.facebook.presto.spi.type.IntegerType.INTEGER;
 import static com.facebook.presto.spi.type.IntervalDayTimeType.INTERVAL_DAY_TIME;
 import static com.facebook.presto.spi.type.IntervalYearMonthType.INTERVAL_YEAR_MONTH;
 import static com.facebook.presto.spi.type.P4HyperLogLogType.P4_HYPER_LOG_LOG;
+import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
 import static com.facebook.presto.spi.type.TimeType.TIME;
 import static com.facebook.presto.spi.type.TimeWithTimeZoneType.TIME_WITH_TIME_ZONE;
 import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
 import static com.facebook.presto.spi.type.TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE;
+import static com.facebook.presto.spi.type.TinyintType.TINYINT;
 import static com.facebook.presto.spi.type.VarbinaryType.VARBINARY;
 import static com.facebook.presto.spi.type.VarcharType.createVarcharType;
 import static com.facebook.presto.type.ArrayParametricType.ARRAY;
 import static com.facebook.presto.type.ColorType.COLOR;
 import static com.facebook.presto.type.FunctionParametricType.FUNCTION;
+import static com.facebook.presto.type.JoniRegexpType.JONI_REGEXP;
 import static com.facebook.presto.type.JsonPathType.JSON_PATH;
 import static com.facebook.presto.type.JsonType.JSON;
 import static com.facebook.presto.type.LikePatternType.LIKE_PATTERN;
 import static com.facebook.presto.type.MapParametricType.MAP;
-import static com.facebook.presto.type.RegexpType.REGEXP;
+import static com.facebook.presto.type.Re2JRegexpType.RE2J_REGEXP;
 import static com.facebook.presto.type.RowParametricType.ROW;
 import static com.facebook.presto.type.UnknownType.UNKNOWN;
 import static com.facebook.presto.util.Types.checkType;
@@ -90,6 +93,8 @@ public final class TypeRegistry
         addType(BOOLEAN);
         addType(BIGINT);
         addType(INTEGER);
+        addType(SMALLINT);
+        addType(TINYINT);
         addType(DOUBLE);
         addType(VARBINARY);
         addType(DATE);
@@ -101,7 +106,8 @@ public final class TypeRegistry
         addType(INTERVAL_DAY_TIME);
         addType(HYPER_LOG_LOG);
         addType(P4_HYPER_LOG_LOG);
-        addType(REGEXP);
+        addType(JONI_REGEXP);
+        addType(RE2J_REGEXP);
         addType(LIKE_PATTERN);
         addType(JSON_PATH);
         addType(COLOR);
@@ -333,7 +339,7 @@ public final class TypeRegistry
                     case StandardTypes.JSON:
                     case StandardTypes.INTERVAL_YEAR_TO_MONTH:
                     case StandardTypes.INTERVAL_DAY_TO_SECOND:
-                    case RegexpType.NAME:
+                    case JoniRegexpType.NAME:
                     case LikePatternType.NAME:
                     case JsonPathType.NAME:
                     case ColorType.NAME:
@@ -346,17 +352,59 @@ public final class TypeRegistry
                         return Optional.empty();
                 }
             }
+            case StandardTypes.TINYINT: {
+                switch (resultTypeBase) {
+                    case StandardTypes.SMALLINT:
+                        return Optional.of(SMALLINT);
+                    case StandardTypes.INTEGER:
+                        return Optional.of(INTEGER);
+                    case StandardTypes.BIGINT:
+                        return Optional.of(BIGINT);
+                    case StandardTypes.DOUBLE:
+                        return Optional.of(DOUBLE);
+                    case StandardTypes.DECIMAL:
+                        return Optional.of(createDecimalType(3, 0));
+                    default:
+                        return Optional.empty();
+                }
+            }
+            case StandardTypes.SMALLINT: {
+                switch (resultTypeBase) {
+                    case StandardTypes.INTEGER:
+                        return Optional.of(INTEGER);
+                    case StandardTypes.BIGINT:
+                        return Optional.of(BIGINT);
+                    case StandardTypes.DOUBLE:
+                        return Optional.of(DOUBLE);
+                    case StandardTypes.DECIMAL:
+                        return Optional.of(createDecimalType(5, 0));
+                    default:
+                        return Optional.empty();
+                }
+            }
             case StandardTypes.INTEGER: {
                 switch (resultTypeBase) {
                     case StandardTypes.BIGINT:
                         return Optional.of(BIGINT);
                     case StandardTypes.DOUBLE:
                         return Optional.of(DOUBLE);
+                    case StandardTypes.DECIMAL:
+                        return Optional.of(createDecimalType(10, 0));
                     default:
                         return Optional.empty();
                 }
             }
             case StandardTypes.BIGINT: {
+                switch (resultTypeBase) {
+                    case StandardTypes.DOUBLE:
+                        return Optional.of(DOUBLE);
+                    case StandardTypes.DECIMAL:
+                        return Optional.of(createDecimalType(19, 0));
+                    default:
+                        return Optional.empty();
+                }
+            }
+            case StandardTypes.DECIMAL: {
                 switch (resultTypeBase) {
                     case StandardTypes.DOUBLE:
                         return Optional.of(DOUBLE);
@@ -392,8 +440,10 @@ public final class TypeRegistry
             }
             case StandardTypes.VARCHAR: {
                 switch (resultTypeBase) {
-                    case RegexpType.NAME:
-                        return Optional.of(REGEXP);
+                    case JoniRegexpType.NAME:
+                        return Optional.of(JONI_REGEXP);
+                    case Re2JRegexpType.NAME:
+                        return Optional.of(RE2J_REGEXP);
                     case LikePatternType.NAME:
                         return Optional.of(LIKE_PATTERN);
                     case JsonPathType.NAME:

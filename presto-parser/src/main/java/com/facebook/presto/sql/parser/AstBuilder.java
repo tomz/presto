@@ -37,6 +37,7 @@ import com.facebook.presto.sql.tree.CreateTableAsSelect;
 import com.facebook.presto.sql.tree.CreateView;
 import com.facebook.presto.sql.tree.Cube;
 import com.facebook.presto.sql.tree.CurrentTime;
+import com.facebook.presto.sql.tree.Deallocate;
 import com.facebook.presto.sql.tree.DecimalLiteral;
 import com.facebook.presto.sql.tree.Delete;
 import com.facebook.presto.sql.tree.DereferenceExpression;
@@ -44,6 +45,7 @@ import com.facebook.presto.sql.tree.DoubleLiteral;
 import com.facebook.presto.sql.tree.DropTable;
 import com.facebook.presto.sql.tree.DropView;
 import com.facebook.presto.sql.tree.Except;
+import com.facebook.presto.sql.tree.Execute;
 import com.facebook.presto.sql.tree.ExistsPredicate;
 import com.facebook.presto.sql.tree.Explain;
 import com.facebook.presto.sql.tree.ExplainFormat;
@@ -81,6 +83,7 @@ import com.facebook.presto.sql.tree.NodeLocation;
 import com.facebook.presto.sql.tree.NotExpression;
 import com.facebook.presto.sql.tree.NullIfExpression;
 import com.facebook.presto.sql.tree.NullLiteral;
+import com.facebook.presto.sql.tree.Prepare;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.QualifiedNameReference;
 import com.facebook.presto.sql.tree.Query;
@@ -323,6 +326,27 @@ class AstBuilder
                 getLocation(context),
                 getQualifiedName(context.qualifiedName()),
                 visit(context.callArgument(), CallArgument.class));
+    }
+
+    @Override
+    public Node visitPrepare(SqlBaseParser.PrepareContext context)
+    {
+        String name = context.identifier().getText();
+        return new Prepare(getLocation(context), name, (Statement) visit(context.statement()));
+    }
+
+    @Override
+    public Node visitDeallocate(SqlBaseParser.DeallocateContext context)
+    {
+        String name = context.identifier().getText();
+        return new Deallocate(getLocation(context), name);
+    }
+
+    @Override
+    public Node visitExecute(SqlBaseParser.ExecuteContext context)
+    {
+        String name = context.identifier().getText();
+        return new Execute(getLocation(context), name);
     }
 
     // ********************** query expressions ********************

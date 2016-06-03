@@ -16,8 +16,7 @@ package com.facebook.presto.sql.planner.optimizations;
 import com.facebook.presto.Session;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.planner.ExpressionSymbolInliner;
-import com.facebook.presto.sql.planner.PartitionFunctionBinding;
-import com.facebook.presto.sql.planner.PartitionFunctionBinding.PartitionFunctionArgumentBinding;
+import com.facebook.presto.sql.planner.PartitioningScheme;
 import com.facebook.presto.sql.planner.PlanNodeIdAllocator;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.SymbolAllocator;
@@ -126,9 +125,7 @@ public class ProjectionPushDown
                 ImmutableList.Builder<Symbol> inputs = ImmutableList.builder();
 
                 // Need to retain the partition keys for the exchange
-                exchange.getPartitionFunction().getPartitionFunctionArguments().stream()
-                        .filter(PartitionFunctionArgumentBinding::isVariable)
-                        .map(PartitionFunctionArgumentBinding::getColumn)
+                exchange.getPartitioningScheme().getPartitioning().getColumns().stream()
                         .map(outputToInputMap::get)
                         .forEach(nameReference -> {
                             Symbol symbol = Symbol.fromQualifiedName(nameReference.getName());
@@ -136,10 +133,10 @@ public class ProjectionPushDown
                             inputs.add(symbol);
                         });
 
-                if (exchange.getPartitionFunction().getHashColumn().isPresent()) {
+                if (exchange.getPartitioningScheme().getHashColumn().isPresent()) {
                     // Need to retain the hash symbol for the exchange
-                    projections.put(exchange.getPartitionFunction().getHashColumn().get(), exchange.getPartitionFunction().getHashColumn().get().toQualifiedNameReference());
-                    inputs.add(exchange.getPartitionFunction().getHashColumn().get());
+                    projections.put(exchange.getPartitioningScheme().getHashColumn().get(), exchange.getPartitioningScheme().getHashColumn().get().toQualifiedNameReference());
+                    inputs.add(exchange.getPartitioningScheme().getHashColumn().get());
                 }
                 for (Map.Entry<Symbol, Expression> projection : node.getAssignments().entrySet()) {
                     Expression translatedExpression = translateExpression(projection.getValue(), outputToInputMap);
@@ -154,31 +151,28 @@ public class ProjectionPushDown
 
             // Construct the output symbols in the same order as the sources
             ImmutableList.Builder<Symbol> outputBuilder = ImmutableList.builder();
-            exchange.getPartitionFunction().getPartitionFunctionArguments().stream()
-                    .filter(PartitionFunctionArgumentBinding::isVariable)
-                    .map(PartitionFunctionArgumentBinding::getColumn)
+            exchange.getPartitioningScheme().getPartitioning().getColumns().stream()
                     .forEach(outputBuilder::add);
-            if (exchange.getPartitionFunction().getHashColumn().isPresent()) {
-                outputBuilder.add(exchange.getPartitionFunction().getHashColumn().get());
+            if (exchange.getPartitioningScheme().getHashColumn().isPresent()) {
+                outputBuilder.add(exchange.getPartitioningScheme().getHashColumn().get());
             }
             for (Map.Entry<Symbol, Expression> projection : node.getAssignments().entrySet()) {
                 outputBuilder.add(projection.getKey());
             }
 
             // outputBuilder contains all partition and hash symbols so simply swap the output layout
-            PartitionFunctionBinding partitionFunction = new PartitionFunctionBinding(
-                    exchange.getPartitionFunction().getPartitioningHandle(),
+            PartitioningScheme partitioningScheme = new PartitioningScheme(
+                    exchange.getPartitioningScheme().getPartitioning(),
                     outputBuilder.build(),
-                    exchange.getPartitionFunction().getPartitionFunctionArguments(),
-                    exchange.getPartitionFunction().getHashColumn(),
-                    exchange.getPartitionFunction().isReplicateNulls(),
-                    exchange.getPartitionFunction().getBucketToPartition());
+                    exchange.getPartitioningScheme().getHashColumn(),
+                    exchange.getPartitioningScheme().isReplicateNulls(),
+                    exchange.getPartitioningScheme().getBucketToPartition());
 
             return new ExchangeNode(
                     exchange.getId(),
                     exchange.getType(),
                     exchange.getScope(),
-                    partitionFunction,
+                    partitioningScheme,
                     newSourceBuilder.build(),
                     inputsBuilder.build());
         }

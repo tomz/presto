@@ -28,7 +28,6 @@ import com.facebook.presto.sql.parser.SqlParser;
 import com.facebook.presto.sql.planner.DomainTranslator;
 import com.facebook.presto.sql.planner.ExpressionInterpreter;
 import com.facebook.presto.sql.planner.NoOpSymbolResolver;
-import com.facebook.presto.sql.planner.PartitionFunctionBinding.PartitionFunctionArgumentBinding;
 import com.facebook.presto.sql.planner.Symbol;
 import com.facebook.presto.sql.planner.optimizations.ActualProperties.Global;
 import com.facebook.presto.sql.planner.plan.AggregationNode;
@@ -86,10 +85,12 @@ import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Glo
 import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Global.singleStreamPartition;
 import static com.facebook.presto.sql.planner.optimizations.ActualProperties.Global.streamPartitionedOn;
 import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.LOCAL;
+import static com.facebook.presto.sql.planner.plan.ExchangeNode.Scope.REMOTE;
 import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.facebook.presto.util.ImmutableCollectors.toImmutableSet;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.base.Verify.verify;
 import static java.util.Objects.requireNonNull;
 import static java.util.stream.Collectors.toMap;
 
@@ -103,6 +104,17 @@ class PropertyDerivations
     }
 
     public static ActualProperties deriveProperties(PlanNode node, List<ActualProperties> inputProperties, Metadata metadata, Session session, Map<Symbol, Type> types, SqlParser parser)
+    {
+        ActualProperties output = node.accept(new Visitor(metadata, session, types, parser), inputProperties);
+
+        // TODO: ideally this logic would be somehow moved to PlanSanityChecker
+        verify(node instanceof SemiJoinNode || inputProperties.stream().noneMatch(ActualProperties::isNullsReplicated) || output.isNullsReplicated(),
+                "SemiJoinNode is the only node that can strip null replication");
+
+        return output;
+    }
+
+    public static ActualProperties streamBackdoorDeriveProperties(PlanNode node, List<ActualProperties> inputProperties, Metadata metadata, Session session, Map<Symbol, Type> types, SqlParser parser)
     {
         return node.accept(new Visitor(metadata, session, types, parser), inputProperties);
     }
@@ -383,6 +395,8 @@ class PropertyDerivations
         @Override
         public ActualProperties visitExchange(ExchangeNode node, List<ActualProperties> inputProperties)
         {
+            checkArgument(node.getScope() != REMOTE || inputProperties.stream().noneMatch(ActualProperties::isNullsReplicated), "Null replicated inputs should not be remotely exchanged");
+
             Set<Map.Entry<Symbol, NullableValue>> entries = null;
             for (int sourceIndex = 0; sourceIndex < node.getSources().size(); sourceIndex++) {
                 Map<Symbol, Symbol> inputToOutput = exchangeInputToOutput(node, sourceIndex);
@@ -408,16 +422,17 @@ class PropertyDerivations
 
             switch (node.getType()) {
                 case GATHER:
+                    boolean coordinatorOnly = node.getPartitioningScheme().getPartitioning().getHandle().isCoordinatorOnly();
                     return ActualProperties.builder()
-                            .global(singleStreamPartition())
+                            .global(coordinatorOnly ? coordinatorSingleStreamPartition() : singleStreamPartition())
                             .constants(constants)
                             .build();
                 case REPARTITION:
                     return ActualProperties.builder()
                             .global(partitionedOn(
-                                    node.getPartitionFunction().getPartitioningHandle(),
-                                    node.getPartitionFunction().getPartitionFunctionArguments(),
-                                    Optional.of(node.getPartitionFunction().getPartitionFunctionArguments())))
+                                    node.getPartitioningScheme().getPartitioning(),
+                                    Optional.of(node.getPartitioningScheme().getPartitioning()))
+                                    .withReplicatedNulls(node.getPartitioningScheme().isReplicateNulls()))
                             .constants(constants)
                             .build();
                 case REPLICATE:
@@ -571,15 +586,14 @@ class PropertyDerivations
 
         private Global deriveGlobalProperties(TableLayout layout, Map<ColumnHandle, Symbol> assignments, Map<ColumnHandle, NullableValue> constants)
         {
-            Optional<List<PartitionFunctionArgumentBinding>> partitioning = layout.getPartitioningColumns()
+            Optional<List<Symbol>> partitioning = layout.getPartitioningColumns()
                     .flatMap(columns -> translateToNonConstantSymbols(columns, assignments, constants));
 
             if (planWithTableNodePartitioning(session) && layout.getNodePartitioning().isPresent()) {
                 NodePartitioning nodePartitioning = layout.getNodePartitioning().get();
                 if (assignments.keySet().containsAll(nodePartitioning.getPartitioningColumns())) {
-                    List<PartitionFunctionArgumentBinding> arguments = nodePartitioning.getPartitioningColumns().stream()
+                    List<Symbol> arguments = nodePartitioning.getPartitioningColumns().stream()
                             .map(assignments::get)
-                            .map(PartitionFunctionArgumentBinding::new)
                             .collect(toImmutableList());
 
                     return partitionedOn(nodePartitioning.getPartitioningHandle(), arguments, partitioning);
@@ -592,7 +606,7 @@ class PropertyDerivations
             return arbitraryPartition();
         }
 
-        private static Optional<List<PartitionFunctionArgumentBinding>> translateToNonConstantSymbols(
+        private static Optional<List<Symbol>> translateToNonConstantSymbols(
                 Set<ColumnHandle> columnHandles,
                 Map<ColumnHandle, Symbol> assignments,
                 Map<ColumnHandle, NullableValue> globalConstants)
@@ -602,13 +616,13 @@ class PropertyDerivations
                     .filter(column -> !globalConstants.containsKey(column))
                     .collect(toImmutableSet());
 
-            ImmutableSet.Builder<PartitionFunctionArgumentBinding> builder = ImmutableSet.builder();
+            ImmutableSet.Builder<Symbol> builder = ImmutableSet.builder();
             for (ColumnHandle column : constantsStrippedColumns) {
                 Symbol translated = assignments.get(column);
                 if (translated == null) {
                     return Optional.empty();
                 }
-                builder.add(new PartitionFunctionArgumentBinding(translated));
+                builder.add(translated);
             }
 
             return Optional.of(ImmutableList.copyOf(builder.build()));

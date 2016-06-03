@@ -76,6 +76,9 @@ statement
         (WHERE booleanExpression)?
         (ORDER BY sortItem (',' sortItem)*)?
         (LIMIT limit=(INTEGER_VALUE | ALL))?                           #showPartitions
+    | PREPARE identifier FROM statement                                #prepare
+    | DEALLOCATE PREPARE identifier                                    #deallocate
+    | EXECUTE identifier                                               #execute
     ;
 
 query
@@ -406,7 +409,7 @@ nonReserved
     : SHOW | TABLES | COLUMNS | COLUMN | PARTITIONS | FUNCTIONS | SCHEMAS | CATALOGS | SESSION
     | ADD
     | OVER | PARTITION | RANGE | ROWS | PRECEDING | FOLLOWING | CURRENT | ROW | MAP | ARRAY
-    | INTEGER | DATE | TIME | TIMESTAMP | INTERVAL | ZONE
+    | TINYINT | SMALLINT | INTEGER | DATE | TIME | TIMESTAMP | INTERVAL | ZONE
     | YEAR | MONTH | DAY | HOUR | MINUTE | SECOND
     | EXPLAIN | ANALYZE | FORMAT | TYPE | TEXT | GRAPHVIZ | LOGICAL | DISTRIBUTED
     | TABLESAMPLE | SYSTEM | BERNOULLI | POISSONIZED | USE | TO
@@ -471,6 +474,8 @@ DESC: 'DESC';
 SUBSTRING: 'SUBSTRING';
 POSITION: 'POSITION';
 FOR: 'FOR';
+TINYINT: 'TINYINT';
+SMALLINT: 'SMALLINT';
 INTEGER: 'INTEGER';
 DATE: 'DATE';
 TIME: 'TIME';
@@ -586,6 +591,9 @@ READ: 'READ';
 WRITE: 'WRITE';
 ONLY: 'ONLY';
 CALL: 'CALL';
+PREPARE: 'PREPARE';
+DEALLOCATE: 'DEALLOCATE';
+EXECUTE: 'EXECUTE';
 
 NORMALIZE: 'NORMALIZE';
 NFD : 'NFD';

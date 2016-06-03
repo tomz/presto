@@ -153,10 +153,6 @@ public final class SqlQueryExecution
                 if (scheduler != null) {
                     scheduler.abort();
                 }
-
-                // capture the final query state and drop reference to the scheduler
-                finalQueryInfo.compareAndSet(null, buildQueryInfo(scheduler));
-                queryScheduler.set(null);
             });
 
             this.remoteTaskFactory = new MemoryTrackingRemoteTaskFactory(requireNonNull(remoteTaskFactory, "remoteTaskFactory is null"), stateMachine);
@@ -415,6 +411,8 @@ public final class SqlQueryExecution
                 queryInfo.getQueryStats(),
                 queryInfo.getSetSessionProperties(),
                 queryInfo.getResetSessionProperties(),
+                queryInfo.getAddedPreparedStatements(),
+                queryInfo.getDeallocatedPreparedStatements(),
                 queryInfo.getStartedTransactionId(),
                 queryInfo.isClearTransactionId(),
                 queryInfo.getUpdateType(),
@@ -462,7 +460,16 @@ public final class SqlQueryExecution
         if (scheduler != null) {
             stageInfo = Optional.ofNullable(scheduler.getStageInfo());
         }
-        return stateMachine.getQueryInfo(stageInfo);
+
+        QueryInfo queryInfo = stateMachine.getQueryInfo(stageInfo);
+
+        if (queryInfo.isFinalQueryInfo()) {
+            // capture the final query state and drop reference to the scheduler
+            finalQueryInfo.compareAndSet(null, queryInfo);
+            queryScheduler.set(null);
+        }
+
+        return queryInfo;
     }
 
     private static class PlanRoot
