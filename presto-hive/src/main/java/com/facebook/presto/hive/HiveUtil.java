@@ -439,7 +439,7 @@ public final class HiveUtil
                 return NullableValue.of(DOUBLE, parseDouble(value));
             }
 
-            if (HIVE_STRING.equals(hiveType) || hiveType.getTypeSignature().getBase().equals(VARCHAR.toString())) {
+            if (HIVE_STRING.equals(hiveType) || hiveType.getTypeSignature().getBase().equals(VARCHAR.getTypeSignature().getBase())) {
                 if (isNull) {
                     return NullableValue.asNull(VARCHAR);
                 }
