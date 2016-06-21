@@ -667,6 +667,10 @@ public class HiveMetadata
         catch (Throwable throwable) {
             partitionCommitter.abort();
             rollbackPartitionUpdates(partitionUpdates, "table creation");
+            // Clean up the target path
+            if (!deleteIfExists(targetPath.toString())) {
+                log.debug("Cannot delete directory %s during create table rollback", targetPath);
+            }
             throw throwable;
         }
     }
