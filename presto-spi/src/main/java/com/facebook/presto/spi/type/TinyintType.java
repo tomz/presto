@@ -17,19 +17,47 @@ import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
+import com.facebook.presto.spi.block.BlockBuilderStatus;
+import com.facebook.presto.spi.block.ByteArrayBlockBuilder;
 
-import static com.facebook.presto.spi.StandardErrorCode.INTERNAL_ERROR;
+import static com.facebook.presto.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
-import static io.airlift.slice.SizeOf.SIZE_OF_BYTE;
 
 public final class TinyintType
-        extends AbstractFixedWidthType
+        extends AbstractType
+        implements FixedWidthType
 {
     public static final TinyintType TINYINT = new TinyintType();
 
     private TinyintType()
     {
-        super(parseTypeSignature(StandardTypes.TINYINT), long.class, SIZE_OF_BYTE);
+        super(parseTypeSignature(StandardTypes.TINYINT), long.class);
+    }
+
+    @Override
+    public int getFixedSize()
+    {
+        return Byte.BYTES;
+    }
+
+    @Override
+    public BlockBuilder createBlockBuilder(BlockBuilderStatus blockBuilderStatus, int expectedEntries, int expectedBytesPerEntry)
+    {
+        return new ByteArrayBlockBuilder(
+                blockBuilderStatus,
+                Math.min(expectedEntries, blockBuilderStatus.getMaxBlockSizeInBytes() / Byte.BYTES));
+    }
+
+    @Override
+    public BlockBuilder createBlockBuilder(BlockBuilderStatus blockBuilderStatus, int expectedEntries)
+    {
+        return createBlockBuilder(blockBuilderStatus, expectedEntries, Byte.BYTES);
+    }
+
+    @Override
+    public BlockBuilder createFixedSizeBlockBuilder(int positionCount)
+    {
+        return new ByteArrayBlockBuilder(new BlockBuilderStatus(), positionCount);
     }
 
     @Override
@@ -99,10 +127,10 @@ public final class TinyintType
     public void writeLong(BlockBuilder blockBuilder, long value)
     {
         if (value > Byte.MAX_VALUE) {
-            throw new PrestoException(INTERNAL_ERROR, String.format("Value %d exceeds MAX_BYTE", value));
+            throw new PrestoException(GENERIC_INTERNAL_ERROR, String.format("Value %d exceeds MAX_BYTE", value));
         }
         else if (value < Byte.MIN_VALUE) {
-            throw new PrestoException(INTERNAL_ERROR, String.format("Value %d is less than MIN_BYTE", value));
+            throw new PrestoException(GENERIC_INTERNAL_ERROR, String.format("Value %d is less than MIN_BYTE", value));
         }
 
         blockBuilder.writeByte((int) value).closeEntry();

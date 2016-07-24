@@ -19,6 +19,7 @@ General Changes
 * Fix data duplication when ``task.writer-count`` configuration mismatches between coordinator and worker.
 * Fix bug where ``node-scheduler.max-pending-splits-per-node-per-task`` config is not always
   honored by node scheduler. This bug could stop the cluster from making further progress.
+* Fix incorrect results for grouping sets with partitioned source.
 * Add ``colocated-joins-enabled`` to enable colocated joins by default for
   connectors that expose node-partitioned data.
 * Add support for colocated unions.
@@ -32,6 +33,31 @@ General Changes
 * Change default ``task.max-worker-threads`` to ``2`` times the number of cores.
 * Use HTTPS in JDBC driver when using port 443.
 * Warn if Presto server is not using G1 garbage collector.
+* Move interval types out of SPI.
+
+Interval Fixes
+--------------
+
+This release fixes several problems with large and negative intervals.
+
+* Fix parsing of negative interval literals. Previously, the sign of each field was treated
+  independently instead of applying to the entire interval value. For example, the literal
+  ``INTERVAL '-2-3' YEAR TO MONTH`` was interpreted as a negative interval of ``21`` months
+  rather than ``27`` months (positive ``3`` months was added to negative ``24`` months).
+* Fix handling of ``INTERVAL DAY TO SECOND`` type in REST API. Previously, intervals greater than
+  ``2,147,483,647`` milliseconds (about ``24`` days) were returned as the wrong value.
+* Fix handling of ``INTERVAL YEAR TO MONTH`` type. Previously, intervals greater than
+  ``2,147,483,647`` months were returned as the wrong value from the REST API
+  and parsed incorrectly when specified as a literal.
+* Fix formatting of negative intervals in REST API. Previously, negative intervals
+  had a negative sign before each component and could not be parsed.
+* Fix formatting of negative intervals in JDBC ``PrestoInterval`` classes.
+
+.. note::
+
+    Older versions of the JDBC driver will misinterpret most negative
+    intervals from new servers. Make sure to update the JDBC driver
+    along with the server.
 
 Functions and Language Features
 -------------------------------

@@ -13,14 +13,19 @@
  */
 package com.facebook.presto.operator.scalar;
 
-import com.facebook.presto.operator.Description;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
+import com.facebook.presto.spi.function.Description;
+import com.facebook.presto.spi.function.LiteralParameters;
+import com.facebook.presto.spi.function.OperatorType;
+import com.facebook.presto.spi.function.ScalarFunction;
+import com.facebook.presto.spi.function.ScalarOperator;
+import com.facebook.presto.spi.function.SqlType;
 import com.facebook.presto.spi.type.StandardTypes;
-import com.facebook.presto.type.LiteralParameters;
-import com.facebook.presto.type.SqlType;
+import com.facebook.presto.spi.type.VarcharType;
+import com.facebook.presto.type.CodePointsType;
 import com.google.common.primitives.Ints;
 import io.airlift.slice.InvalidCodePointException;
 import io.airlift.slice.InvalidUtf8Exception;
@@ -39,11 +44,13 @@ import static com.facebook.presto.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMEN
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.facebook.presto.util.Failures.checkCondition;
 import static io.airlift.slice.SliceUtf8.countCodePoints;
+import static io.airlift.slice.SliceUtf8.getCodePointAt;
 import static io.airlift.slice.SliceUtf8.lengthOfCodePoint;
 import static io.airlift.slice.SliceUtf8.lengthOfCodePointSafe;
 import static io.airlift.slice.SliceUtf8.offsetOfCodePoint;
 import static io.airlift.slice.SliceUtf8.toLowerCase;
 import static io.airlift.slice.SliceUtf8.toUpperCase;
+import static io.airlift.slice.SliceUtf8.tryGetCodePointAt;
 import static io.airlift.slice.Slices.utf8Slice;
 import static java.lang.Character.MAX_CODE_POINT;
 import static java.lang.Character.SURROGATE;
@@ -448,6 +455,60 @@ public final class StringFunctions
         return SliceUtf8.trim(slice);
     }
 
+    @Description("remove the longest string containing only given characters from the beginning of a string")
+    @ScalarFunction("ltrim")
+    @LiteralParameters("x")
+    @SqlType("varchar(x)")
+    public static Slice leftTrim(@SqlType("varchar(x)") Slice slice, @SqlType(CodePointsType.NAME) int[] codePointsToTrim)
+    {
+        return SliceUtf8.leftTrim(slice, codePointsToTrim);
+    }
+
+    @Description("remove the longest string containing only given characters from the end of a string")
+    @ScalarFunction("rtrim")
+    @LiteralParameters("x")
+    @SqlType("varchar(x)")
+    public static Slice rightTrim(@SqlType("varchar(x)") Slice slice, @SqlType(CodePointsType.NAME) int[] codePointsToTrim)
+    {
+        return SliceUtf8.rightTrim(slice, codePointsToTrim);
+    }
+
+    @Description("remove the longest string containing only given characters from the beginning and end of a string")
+    @ScalarFunction("trim")
+    @LiteralParameters("x")
+    @SqlType("varchar(x)")
+    public static Slice trim(@SqlType("varchar(x)") Slice slice, @SqlType(CodePointsType.NAME) int[] codePointsToTrim)
+    {
+        return SliceUtf8.trim(slice, codePointsToTrim);
+    }
+
+    @ScalarOperator(OperatorType.CAST)
+    @SqlType(CodePointsType.NAME)
+    public static int[] castToCodePoints(@SqlType(StandardTypes.VARCHAR) Slice slice)
+    {
+        int[] codePoints = new int[safeCountCodePoints(slice)];
+        int position = 0;
+        for (int index = 0; index < codePoints.length; index++) {
+            codePoints[index] = getCodePointAt(slice, position);
+            position += lengthOfCodePoint(slice, position);
+        }
+        return codePoints;
+    }
+
+    private static int safeCountCodePoints(Slice slice)
+    {
+        int codePoints = 0;
+        for (int position = 0; position < slice.length(); ) {
+            int codePoint = tryGetCodePointAt(slice, position);
+            if (codePoint < 0) {
+                throw new PrestoException(INVALID_FUNCTION_ARGUMENT, "Invalid UTF-8 encoding in characters to trim: " + slice.toStringUtf8());
+            }
+            position += lengthOfCodePoint(codePoint);
+            codePoints++;
+        }
+        return codePoints;
+    }
+
     @Description("converts the string to lower case")
     @ScalarFunction
     @LiteralParameters("x")
@@ -469,9 +530,9 @@ public final class StringFunctions
     private static Slice pad(Slice text, long targetLength, Slice padString, int paddingOffset)
     {
         checkCondition(
-            0 <= targetLength && targetLength <= Integer.MAX_VALUE,
-            INVALID_FUNCTION_ARGUMENT,
-            "Target length must be in the range [0.." + Integer.MAX_VALUE + "]"
+                0 <= targetLength && targetLength <= Integer.MAX_VALUE,
+                INVALID_FUNCTION_ARGUMENT,
+                "Target length must be in the range [0.." + Integer.MAX_VALUE + "]"
         );
         checkCondition(padString.length() > 0, INVALID_FUNCTION_ARGUMENT, "Padding string must not be empty");
 
@@ -540,8 +601,9 @@ public final class StringFunctions
 
     @Description("transforms the string to normalized form")
     @ScalarFunction
-    @SqlType(StandardTypes.VARCHAR)
-    public static Slice normalize(@SqlType(StandardTypes.VARCHAR) Slice slice, @SqlType(StandardTypes.VARCHAR) Slice form)
+    @LiteralParameters({"x", "y"})
+    @SqlType(VarcharType.VARCHAR_MAX_LENGTH)
+    public static Slice normalize(@SqlType("varchar(x)") Slice slice, @SqlType("varchar(y)") Slice form)
     {
         Normalizer.Form targetForm;
         try {
@@ -574,7 +636,7 @@ public final class StringFunctions
         OptionalInt replacementCodePoint;
         if (count == 1) {
             try {
-                replacementCodePoint = OptionalInt.of(SliceUtf8.getCodePointAt(replacementCharacter, 0));
+                replacementCodePoint = OptionalInt.of(getCodePointAt(replacementCharacter, 0));
             }
             catch (InvalidUtf8Exception e) {
                 throw new PrestoException(INVALID_FUNCTION_ARGUMENT, "Invalid replacement character");

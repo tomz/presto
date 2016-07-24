@@ -23,12 +23,11 @@ import com.facebook.presto.spi.block.BlockEncodingFactory;
 import com.facebook.presto.spi.classloader.ThreadContextClassLoader;
 import com.facebook.presto.spi.connector.ConnectorFactory;
 import com.facebook.presto.spi.security.SystemAccessControlFactory;
+import com.facebook.presto.spi.type.ParametricType;
 import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.type.ParametricType;
 import com.facebook.presto.type.TypeRegistry;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.inject.Injector;
 import io.airlift.configuration.ConfigurationFactory;
@@ -56,6 +55,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.facebook.presto.metadata.FunctionExtractor.extractFunctions;
 import static com.facebook.presto.server.PluginDiscovery.discoverPlugins;
 import static com.facebook.presto.server.PluginDiscovery.writePluginServices;
 import static java.util.Objects.requireNonNull;
@@ -222,6 +222,11 @@ public class PluginManager
             metadata.addFunctions(functionFactory.listFunctions());
         }
 
+        for (Class<?> functionClass : plugin.getFunctions()) {
+            log.info("Registering functions from %s", functionClass.getName());
+            metadata.addFunctions(extractFunctions(functionClass));
+        }
+
         for (SystemAccessControlFactory accessControlFactory : plugin.getServices(SystemAccessControlFactory.class)) {
             log.info("Registering system access control %s", accessControlFactory.getName());
             accessControlManager.addSystemAccessControlFactory(accessControlFactory);
@@ -312,7 +317,7 @@ public class PluginManager
 
     private static List<Artifact> sortedArtifacts(List<Artifact> artifacts)
     {
-        List<Artifact> list = Lists.newArrayList(artifacts);
+        List<Artifact> list = new ArrayList<>(artifacts);
         Collections.sort(list, Ordering.natural().nullsLast().onResultOf(Artifact::getFile));
         return list;
     }

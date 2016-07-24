@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.server;
 
+import com.facebook.presto.OutputBuffers.OutputBufferId;
 import com.facebook.presto.Session;
 import com.facebook.presto.client.ClientTypeSignature;
 import com.facebook.presto.client.Column;
@@ -21,18 +22,17 @@ import com.facebook.presto.client.QueryError;
 import com.facebook.presto.client.QueryResults;
 import com.facebook.presto.client.StageStats;
 import com.facebook.presto.client.StatementStats;
-import com.facebook.presto.execution.BufferInfo;
 import com.facebook.presto.execution.QueryId;
 import com.facebook.presto.execution.QueryIdGenerator;
 import com.facebook.presto.execution.QueryInfo;
 import com.facebook.presto.execution.QueryManager;
 import com.facebook.presto.execution.QueryState;
 import com.facebook.presto.execution.QueryStats;
-import com.facebook.presto.execution.SharedBufferInfo;
 import com.facebook.presto.execution.StageInfo;
 import com.facebook.presto.execution.StageState;
-import com.facebook.presto.execution.TaskId;
 import com.facebook.presto.execution.TaskInfo;
+import com.facebook.presto.execution.buffer.BufferInfo;
+import com.facebook.presto.execution.buffer.OutputBufferInfo;
 import com.facebook.presto.metadata.SessionPropertyManager;
 import com.facebook.presto.operator.ExchangeClient;
 import com.facebook.presto.operator.ExchangeClientSupplier;
@@ -100,8 +100,7 @@ import static com.facebook.presto.client.PrestoHeaders.PRESTO_STARTED_TRANSACTIO
 import static com.facebook.presto.server.ResourceUtil.assertRequest;
 import static com.facebook.presto.server.ResourceUtil.createSessionForRequest;
 import static com.facebook.presto.server.ResourceUtil.urlEncode;
-import static com.facebook.presto.spi.StandardErrorCode.INTERNAL_ERROR;
-import static com.facebook.presto.spi.StandardErrorCode.toErrorType;
+import static com.facebook.presto.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static com.facebook.presto.util.Failures.toFailure;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Strings.isNullOrEmpty;
@@ -526,7 +525,7 @@ public class StatementResource
             // add any additional output locations
             if (!outputStage.getState().isDone()) {
                 for (TaskInfo taskInfo : outputStage.getTasks()) {
-                    SharedBufferInfo outputBuffers = taskInfo.getOutputBuffers();
+                    OutputBufferInfo outputBuffers = taskInfo.getOutputBuffers();
                     List<BufferInfo> buffers = outputBuffers.getBuffers();
                     if (buffers.isEmpty() || outputBuffers.getState().canAddBuffers()) {
                         // output buffer has not been created yet
@@ -537,7 +536,7 @@ public class StatementResource
                             taskInfo.getTaskStatus().getTaskId(),
                             buffers);
 
-                    TaskId bufferId = Iterables.getOnlyElement(buffers).getBufferId();
+                    OutputBufferId bufferId = Iterables.getOnlyElement(buffers).getBufferId();
                     URI uri = uriBuilderFrom(taskInfo.getTaskStatus().getSelf()).appendPath("results").appendPath(bufferId.toString()).build();
                     exchangeClient.addLocation(uri);
                 }
@@ -599,6 +598,7 @@ public class StatementResource
 
             return StatementStats.builder()
                     .setState(queryInfo.getState().toString())
+                    .setQueued(queryInfo.getState() == QueryState.QUEUED)
                     .setScheduled(queryInfo.isScheduled())
                     .setNodes(globalUniqueNodes(outputStage).size())
                     .setTotalSplits(queryStats.getTotalDrivers())
@@ -713,7 +713,7 @@ public class StatementResource
                 errorCode = queryInfo.getErrorCode();
             }
             else {
-                errorCode = INTERNAL_ERROR.toErrorCode();
+                errorCode = GENERIC_INTERNAL_ERROR.toErrorCode();
                 log.warn("Failed query %s has no error code", queryInfo.getQueryId());
             }
             return new QueryError(
@@ -721,7 +721,7 @@ public class StatementResource
                     null,
                     errorCode.getCode(),
                     errorCode.getName(),
-                    toErrorType(errorCode.getCode()).toString(),
+                    errorCode.getType().toString(),
                     failure.getErrorLocation(),
                     failure);
         }

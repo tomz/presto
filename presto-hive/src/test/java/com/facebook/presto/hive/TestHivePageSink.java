@@ -14,7 +14,8 @@
 package com.facebook.presto.hive;
 
 import com.facebook.presto.GroupByHashPageIndexerFactory;
-import com.facebook.presto.hive.metastore.HiveMetastore;
+import com.facebook.presto.hive.metastore.BridgingHiveMetastore;
+import com.facebook.presto.hive.metastore.ExtendedHiveMetastore;
 import com.facebook.presto.hive.metastore.InMemoryHiveMetastore;
 import com.facebook.presto.spi.ConnectorPageSink;
 import com.facebook.presto.spi.ConnectorPageSource;
@@ -37,6 +38,7 @@ import io.airlift.tpch.LineItem;
 import io.airlift.tpch.LineItemColumn;
 import io.airlift.tpch.LineItemGenerator;
 import io.airlift.tpch.TpchColumnType;
+import io.airlift.tpch.TpchColumnTypes;
 import org.apache.hadoop.fs.Path;
 import org.testng.annotations.Test;
 
@@ -86,7 +88,7 @@ public class TestHivePageSink
         HiveClientConfig config = new HiveClientConfig();
         File tempDir = Files.createTempDir();
         try {
-            HiveMetastore metastore = new InMemoryHiveMetastore(new File(tempDir, "metastore"));
+            ExtendedHiveMetastore metastore = new BridgingHiveMetastore(new InMemoryHiveMetastore(new File(tempDir, "metastore")));
             for (HiveStorageFormat format : HiveStorageFormat.values()) {
                 config.setHiveStorageFormat(format);
                 config.setHiveCompressionCodec(NONE);
@@ -113,7 +115,7 @@ public class TestHivePageSink
         return tempDir.getAbsolutePath() + "/" + config.getHiveStorageFormat().name() + "." + config.getHiveCompressionCodec().name();
     }
 
-    private static long writeTestFile(HiveClientConfig config, HiveMetastore metastore, String outputPath)
+    private static long writeTestFile(HiveClientConfig config, ExtendedHiveMetastore metastore, String outputPath)
     {
         HiveTransactionHandle transaction = new HiveTransactionHandle();
         ConnectorPageSink pageSink = createPageSink(transaction, config, metastore, new Path("file:///" + outputPath));
@@ -135,7 +137,7 @@ public class TestHivePageSink
             for (int i = 0; i < columns.size(); i++) {
                 LineItemColumn column = columns.get(i);
                 BlockBuilder blockBuilder = pageBuilder.getBlockBuilder(i);
-                switch (column.getType()) {
+                switch (column.getType().getBase()) {
                     case IDENTIFIER:
                         BIGINT.writeLong(blockBuilder, column.getIdentifier(lineItem));
                         break;
@@ -203,7 +205,7 @@ public class TestHivePageSink
         return provider.createPageSource(transaction, getSession(config), split, ImmutableList.copyOf(getColumnHandles()));
     }
 
-    private static ConnectorPageSink createPageSink(HiveTransactionHandle transaction, HiveClientConfig config, HiveMetastore metastore, Path outputPath)
+    private static ConnectorPageSink createPageSink(HiveTransactionHandle transaction, HiveClientConfig config, ExtendedHiveMetastore metastore, Path outputPath)
     {
         LocationHandle locationHandle = new LocationHandle(outputPath, Optional.of(outputPath), false);
         HiveOutputTableHandle handle = new HiveOutputTableHandle(CLIENT_ID, SCHEMA_NAME, TABLE_NAME, getColumnHandles(), "test", locationHandle, config.getHiveStorageFormat(), config.getHiveStorageFormat(), ImmutableList.of(), Optional.empty(), "test", ImmutableMap.of());
@@ -234,13 +236,13 @@ public class TestHivePageSink
     {
         return Stream.of(LineItemColumn.values())
                 // Not all the formats support DATE
-                .filter(column -> column.getType() != TpchColumnType.DATE)
+                .filter(column -> !column.getType().equals(TpchColumnTypes.DATE))
                 .collect(toList());
     }
 
     private static HiveType getHiveType(TpchColumnType type)
     {
-        switch (type) {
+        switch (type.getBase()) {
             case IDENTIFIER:
                 return HIVE_LONG;
             case INTEGER:

@@ -14,6 +14,7 @@
 package com.facebook.presto.type;
 
 import com.facebook.presto.spi.type.DecimalType;
+import com.facebook.presto.spi.type.ParametricType;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
@@ -40,10 +41,9 @@ import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DateType.DATE;
 import static com.facebook.presto.spi.type.DecimalType.createDecimalType;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
+import static com.facebook.presto.spi.type.FloatType.FLOAT;
 import static com.facebook.presto.spi.type.HyperLogLogType.HYPER_LOG_LOG;
 import static com.facebook.presto.spi.type.IntegerType.INTEGER;
-import static com.facebook.presto.spi.type.IntervalDayTimeType.INTERVAL_DAY_TIME;
-import static com.facebook.presto.spi.type.IntervalYearMonthType.INTERVAL_YEAR_MONTH;
 import static com.facebook.presto.spi.type.P4HyperLogLogType.P4_HYPER_LOG_LOG;
 import static com.facebook.presto.spi.type.SmallintType.SMALLINT;
 import static com.facebook.presto.spi.type.TimeType.TIME;
@@ -54,8 +54,11 @@ import static com.facebook.presto.spi.type.TinyintType.TINYINT;
 import static com.facebook.presto.spi.type.VarbinaryType.VARBINARY;
 import static com.facebook.presto.spi.type.VarcharType.createVarcharType;
 import static com.facebook.presto.type.ArrayParametricType.ARRAY;
+import static com.facebook.presto.type.CodePointsType.CODE_POINTS;
 import static com.facebook.presto.type.ColorType.COLOR;
 import static com.facebook.presto.type.FunctionParametricType.FUNCTION;
+import static com.facebook.presto.type.IntervalDayTimeType.INTERVAL_DAY_TIME;
+import static com.facebook.presto.type.IntervalYearMonthType.INTERVAL_YEAR_MONTH;
 import static com.facebook.presto.type.JoniRegexpType.JONI_REGEXP;
 import static com.facebook.presto.type.JsonPathType.JSON_PATH;
 import static com.facebook.presto.type.JsonType.JSON;
@@ -96,6 +99,7 @@ public final class TypeRegistry
         addType(SMALLINT);
         addType(TINYINT);
         addType(DOUBLE);
+        addType(FLOAT);
         addType(VARBINARY);
         addType(DATE);
         addType(TIME);
@@ -112,6 +116,7 @@ public final class TypeRegistry
         addType(JSON_PATH);
         addType(COLOR);
         addType(JSON);
+        addType(CODE_POINTS);
         addParametricType(VarcharParametricType.VARCHAR);
         addParametricType(DecimalParametricType.DECIMAL);
         addParametricType(ROW);
@@ -328,6 +333,7 @@ public final class TypeRegistry
                     case StandardTypes.BIGINT:
                     case StandardTypes.INTEGER:
                     case StandardTypes.DOUBLE:
+                    case StandardTypes.FLOAT:
                     case StandardTypes.VARBINARY:
                     case StandardTypes.DATE:
                     case StandardTypes.TIME:
@@ -343,6 +349,7 @@ public final class TypeRegistry
                     case LikePatternType.NAME:
                     case JsonPathType.NAME:
                     case ColorType.NAME:
+                    case CodePointsType.NAME:
                         return Optional.of(getType(new TypeSignature(resultTypeBase)));
                     case StandardTypes.VARCHAR:
                         return Optional.of(createVarcharType(0));
@@ -360,6 +367,8 @@ public final class TypeRegistry
                         return Optional.of(INTEGER);
                     case StandardTypes.BIGINT:
                         return Optional.of(BIGINT);
+                    case StandardTypes.FLOAT:
+                        return Optional.of(FLOAT);
                     case StandardTypes.DOUBLE:
                         return Optional.of(DOUBLE);
                     case StandardTypes.DECIMAL:
@@ -374,6 +383,8 @@ public final class TypeRegistry
                         return Optional.of(INTEGER);
                     case StandardTypes.BIGINT:
                         return Optional.of(BIGINT);
+                    case StandardTypes.FLOAT:
+                        return Optional.of(FLOAT);
                     case StandardTypes.DOUBLE:
                         return Optional.of(DOUBLE);
                     case StandardTypes.DECIMAL:
@@ -386,6 +397,8 @@ public final class TypeRegistry
                 switch (resultTypeBase) {
                     case StandardTypes.BIGINT:
                         return Optional.of(BIGINT);
+                    case StandardTypes.FLOAT:
+                        return Optional.of(FLOAT);
                     case StandardTypes.DOUBLE:
                         return Optional.of(DOUBLE);
                     case StandardTypes.DECIMAL:
@@ -396,6 +409,8 @@ public final class TypeRegistry
             }
             case StandardTypes.BIGINT: {
                 switch (resultTypeBase) {
+                    case StandardTypes.FLOAT:
+                        return Optional.of(FLOAT);
                     case StandardTypes.DOUBLE:
                         return Optional.of(DOUBLE);
                     case StandardTypes.DECIMAL:
@@ -405,6 +420,16 @@ public final class TypeRegistry
                 }
             }
             case StandardTypes.DECIMAL: {
+                switch (resultTypeBase) {
+                    case StandardTypes.FLOAT:
+                        return Optional.of(FLOAT);
+                    case StandardTypes.DOUBLE:
+                        return Optional.of(DOUBLE);
+                    default:
+                        return Optional.empty();
+                }
+            }
+            case StandardTypes.FLOAT: {
                 switch (resultTypeBase) {
                     case StandardTypes.DOUBLE:
                         return Optional.of(DOUBLE);
@@ -448,6 +473,8 @@ public final class TypeRegistry
                         return Optional.of(LIKE_PATTERN);
                     case JsonPathType.NAME:
                         return Optional.of(JSON_PATH);
+                    case CodePointsType.NAME:
+                        return Optional.of(CODE_POINTS);
                     default:
                         return Optional.empty();
                 }

@@ -20,24 +20,34 @@ import com.facebook.presto.operator.aggregation.ApproximateCountColumnAggregatio
 import com.facebook.presto.operator.aggregation.ApproximateCountDistinctAggregations;
 import com.facebook.presto.operator.aggregation.ApproximateDoublePercentileAggregations;
 import com.facebook.presto.operator.aggregation.ApproximateDoublePercentileArrayAggregations;
+import com.facebook.presto.operator.aggregation.ApproximateFloatPercentileAggregations;
+import com.facebook.presto.operator.aggregation.ApproximateFloatPercentileArrayAggregations;
 import com.facebook.presto.operator.aggregation.ApproximateLongPercentileAggregations;
 import com.facebook.presto.operator.aggregation.ApproximateLongPercentileArrayAggregations;
 import com.facebook.presto.operator.aggregation.ApproximateSetAggregation;
 import com.facebook.presto.operator.aggregation.ApproximateSumAggregations;
+import com.facebook.presto.operator.aggregation.ArrayAggregationFunction;
 import com.facebook.presto.operator.aggregation.AverageAggregations;
 import com.facebook.presto.operator.aggregation.BooleanAndAggregation;
 import com.facebook.presto.operator.aggregation.BooleanOrAggregation;
-import com.facebook.presto.operator.aggregation.CorrelationAggregation;
 import com.facebook.presto.operator.aggregation.CountAggregation;
 import com.facebook.presto.operator.aggregation.CountIfAggregation;
-import com.facebook.presto.operator.aggregation.CovarianceAggregation;
+import com.facebook.presto.operator.aggregation.DoubleCorrelationAggregation;
+import com.facebook.presto.operator.aggregation.DoubleCovarianceAggregation;
+import com.facebook.presto.operator.aggregation.DoubleHistogramAggregation;
+import com.facebook.presto.operator.aggregation.DoubleRegressionAggregation;
 import com.facebook.presto.operator.aggregation.DoubleSumAggregation;
+import com.facebook.presto.operator.aggregation.FloatAverageAggregation;
+import com.facebook.presto.operator.aggregation.FloatCorrelationAggregation;
+import com.facebook.presto.operator.aggregation.FloatCovarianceAggregation;
+import com.facebook.presto.operator.aggregation.FloatGeometricMeanAggregations;
+import com.facebook.presto.operator.aggregation.FloatHistogramAggregation;
+import com.facebook.presto.operator.aggregation.FloatRegressionAggregation;
+import com.facebook.presto.operator.aggregation.FloatSumAggregation;
 import com.facebook.presto.operator.aggregation.GeometricMeanAggregations;
 import com.facebook.presto.operator.aggregation.InternalAggregationFunction;
 import com.facebook.presto.operator.aggregation.LongSumAggregation;
 import com.facebook.presto.operator.aggregation.MergeHyperLogLogAggregation;
-import com.facebook.presto.operator.aggregation.NumericHistogramAggregation;
-import com.facebook.presto.operator.aggregation.RegressionAggregation;
 import com.facebook.presto.operator.aggregation.VarianceAggregation;
 import com.facebook.presto.operator.scalar.ArrayCardinalityFunction;
 import com.facebook.presto.operator.scalar.ArrayConcatFunction;
@@ -56,8 +66,10 @@ import com.facebook.presto.operator.scalar.ArrayMinFunction;
 import com.facebook.presto.operator.scalar.ArrayNotEqualOperator;
 import com.facebook.presto.operator.scalar.ArrayPositionFunction;
 import com.facebook.presto.operator.scalar.ArrayRemoveFunction;
+import com.facebook.presto.operator.scalar.ArrayReverseFunction;
 import com.facebook.presto.operator.scalar.ArraySliceFunction;
 import com.facebook.presto.operator.scalar.ArraySortFunction;
+import com.facebook.presto.operator.scalar.ArrayUnionFunction;
 import com.facebook.presto.operator.scalar.BitwiseFunctions;
 import com.facebook.presto.operator.scalar.ColorFunctions;
 import com.facebook.presto.operator.scalar.CombineHashFunction;
@@ -98,6 +110,7 @@ import com.facebook.presto.operator.window.WindowFunctionSupplier;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockEncodingSerde;
+import com.facebook.presto.spi.function.OperatorType;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.TypeSignature;
@@ -111,6 +124,7 @@ import com.facebook.presto.type.DateOperators;
 import com.facebook.presto.type.DateTimeOperators;
 import com.facebook.presto.type.DecimalOperators;
 import com.facebook.presto.type.DoubleOperators;
+import com.facebook.presto.type.FloatOperators;
 import com.facebook.presto.type.HyperLogLogOperators;
 import com.facebook.presto.type.IntegerOperators;
 import com.facebook.presto.type.IntervalDayTimeOperators;
@@ -162,7 +176,6 @@ import static com.facebook.presto.metadata.FunctionKind.SCALAR;
 import static com.facebook.presto.metadata.FunctionKind.WINDOW;
 import static com.facebook.presto.metadata.Signature.internalOperator;
 import static com.facebook.presto.operator.aggregation.ArbitraryAggregationFunction.ARBITRARY_AGGREGATION;
-import static com.facebook.presto.operator.aggregation.ArrayAggregationFunction.ARRAY_AGGREGATION;
 import static com.facebook.presto.operator.aggregation.ChecksumAggregationFunction.CHECKSUM_AGGREGATION;
 import static com.facebook.presto.operator.aggregation.CountColumn.COUNT_COLUMN;
 import static com.facebook.presto.operator.aggregation.Histogram.HISTOGRAM;
@@ -221,12 +234,14 @@ import static com.facebook.presto.type.DecimalCasts.BOOLEAN_TO_DECIMAL_CAST;
 import static com.facebook.presto.type.DecimalCasts.DECIMAL_TO_BIGINT_CAST;
 import static com.facebook.presto.type.DecimalCasts.DECIMAL_TO_BOOLEAN_CAST;
 import static com.facebook.presto.type.DecimalCasts.DECIMAL_TO_DOUBLE_CAST;
+import static com.facebook.presto.type.DecimalCasts.DECIMAL_TO_FLOAT_CAST;
 import static com.facebook.presto.type.DecimalCasts.DECIMAL_TO_INTEGER_CAST;
 import static com.facebook.presto.type.DecimalCasts.DECIMAL_TO_JSON_CAST;
 import static com.facebook.presto.type.DecimalCasts.DECIMAL_TO_SMALLINT_CAST;
 import static com.facebook.presto.type.DecimalCasts.DECIMAL_TO_TINYINT_CAST;
 import static com.facebook.presto.type.DecimalCasts.DECIMAL_TO_VARCHAR_CAST;
 import static com.facebook.presto.type.DecimalCasts.DOUBLE_TO_DECIMAL_CAST;
+import static com.facebook.presto.type.DecimalCasts.FLOAT_TO_DECIMAL_CAST;
 import static com.facebook.presto.type.DecimalCasts.INTEGER_TO_DECIMAL_CAST;
 import static com.facebook.presto.type.DecimalCasts.JSON_TO_DECIMAL_CAST;
 import static com.facebook.presto.type.DecimalCasts.SMALLINT_TO_DECIMAL_CAST;
@@ -325,79 +340,85 @@ public class FunctionRegistry
                     }
                 });
 
-        FunctionListBuilder builder = new FunctionListBuilder(typeManager)
-                .window("row_number", BIGINT, ImmutableList.<Type>of(), RowNumberFunction.class)
-                .window("rank", BIGINT, ImmutableList.<Type>of(), RankFunction.class)
-                .window("dense_rank", BIGINT, ImmutableList.<Type>of(), DenseRankFunction.class)
-                .window("percent_rank", DOUBLE, ImmutableList.<Type>of(), PercentRankFunction.class)
-                .window("cume_dist", DOUBLE, ImmutableList.<Type>of(), CumulativeDistributionFunction.class)
-                .window("ntile", BIGINT, ImmutableList.<Type>of(BIGINT), NTileFunction.class)
-                .window("first_value", FirstValueFunction.class, "T", "T")
-                .window("last_value", LastValueFunction.class, "T", "T")
-                .window("nth_value", NthValueFunction.class, "T", "T", "bigint")
-                .window("lag", LagFunction.class, "T", "T")
-                .window("lag", LagFunction.class, "T", "T", "bigint")
-                .window("lag", LagFunction.class, "T", "T", "bigint", "T")
-                .window("lead", LeadFunction.class, "T", "T")
-                .window("lead", LeadFunction.class, "T", "T", "bigint")
-                .window("lead", LeadFunction.class, "T", "T", "bigint", "T")
+        FunctionListBuilder builder = new FunctionListBuilder()
+                .window(RowNumberFunction.class)
+                .window(RankFunction.class)
+                .window(DenseRankFunction.class)
+                .window(PercentRankFunction.class)
+                .window(CumulativeDistributionFunction.class)
+                .window(NTileFunction.class)
+                .window(FirstValueFunction.class)
+                .window(LastValueFunction.class)
+                .window(NthValueFunction.class)
+                .window(LagFunction.class)
+                .window(LeadFunction.class)
                 .aggregate(CountAggregation.class)
                 .aggregate(VarianceAggregation.class)
                 .aggregate(ApproximateLongPercentileAggregations.class)
                 .aggregate(ApproximateLongPercentileArrayAggregations.class)
                 .aggregate(ApproximateDoublePercentileAggregations.class)
                 .aggregate(ApproximateDoublePercentileArrayAggregations.class)
+                .aggregate(ApproximateFloatPercentileAggregations.class)
+                .aggregate(ApproximateFloatPercentileArrayAggregations.class)
                 .aggregate(CountIfAggregation.class)
                 .aggregate(BooleanAndAggregation.class)
                 .aggregate(BooleanOrAggregation.class)
                 .aggregate(DoubleSumAggregation.class)
+                .aggregate(FloatSumAggregation.class)
                 .aggregate(LongSumAggregation.class)
                 .aggregate(AverageAggregations.class)
+                .aggregate(FloatAverageAggregation.class)
                 .aggregate(GeometricMeanAggregations.class)
+                .aggregate(FloatGeometricMeanAggregations.class)
                 .aggregate(ApproximateCountDistinctAggregations.class)
                 .aggregate(MergeHyperLogLogAggregation.class)
                 .aggregate(ApproximateSetAggregation.class)
-                .aggregate(NumericHistogramAggregation.class)
-                .aggregate(CovarianceAggregation.class)
-                .aggregate(RegressionAggregation.class)
-                .aggregate(CorrelationAggregation.class)
-                .scalar(SequenceFunction.class)
-                .scalar(StringFunctions.class)
-                .scalar(VarbinaryFunctions.class)
-                .scalar(UrlFunctions.class)
-                .scalar(MathFunctions.class)
-                .scalar(BitwiseFunctions.class)
-                .scalar(DateTimeFunctions.class)
-                .scalar(JsonFunctions.class)
-                .scalar(ColorFunctions.class)
-                .scalar(ColorOperators.class)
-                .scalar(HyperLogLogFunctions.class)
-                .scalar(UnknownOperators.class)
-                .scalar(BooleanOperators.class)
-                .scalar(BigintOperators.class)
-                .scalar(IntegerOperators.class)
-                .scalar(SmallintOperators.class)
-                .scalar(TinyintOperators.class)
-                .scalar(DoubleOperators.class)
-                .scalar(VarcharOperators.class)
-                .scalar(VarbinaryOperators.class)
-                .scalar(DateOperators.class)
-                .scalar(TimeOperators.class)
-                .scalar(TimestampOperators.class)
-                .scalar(IntervalDayTimeOperators.class)
-                .scalar(IntervalYearMonthOperators.class)
-                .scalar(TimeWithTimeZoneOperators.class)
-                .scalar(TimestampWithTimeZoneOperators.class)
-                .scalar(DateTimeOperators.class)
-                .scalar(HyperLogLogOperators.class)
-                .scalar(LikeFunctions.class)
-                .scalar(ArrayFunctions.class)
+                .aggregate(DoubleHistogramAggregation.class)
+                .aggregate(FloatHistogramAggregation.class)
+                .aggregate(DoubleCovarianceAggregation.class)
+                .aggregate(FloatCovarianceAggregation.class)
+                .aggregate(DoubleRegressionAggregation.class)
+                .aggregate(FloatRegressionAggregation.class)
+                .aggregate(DoubleCorrelationAggregation.class)
+                .aggregate(FloatCorrelationAggregation.class)
+                .scalars(SequenceFunction.class)
+                .scalars(StringFunctions.class)
+                .scalars(VarbinaryFunctions.class)
+                .scalars(UrlFunctions.class)
+                .scalars(MathFunctions.class)
+                .scalars(BitwiseFunctions.class)
+                .scalars(DateTimeFunctions.class)
+                .scalars(JsonFunctions.class)
+                .scalars(ColorFunctions.class)
+                .scalars(ColorOperators.class)
+                .scalars(HyperLogLogFunctions.class)
+                .scalars(UnknownOperators.class)
+                .scalars(BooleanOperators.class)
+                .scalars(BigintOperators.class)
+                .scalars(IntegerOperators.class)
+                .scalars(SmallintOperators.class)
+                .scalars(TinyintOperators.class)
+                .scalars(DoubleOperators.class)
+                .scalars(FloatOperators.class)
+                .scalars(VarcharOperators.class)
+                .scalars(VarbinaryOperators.class)
+                .scalars(DateOperators.class)
+                .scalars(TimeOperators.class)
+                .scalars(TimestampOperators.class)
+                .scalars(IntervalDayTimeOperators.class)
+                .scalars(IntervalYearMonthOperators.class)
+                .scalars(TimeWithTimeZoneOperators.class)
+                .scalars(TimestampWithTimeZoneOperators.class)
+                .scalars(DateTimeOperators.class)
+                .scalars(HyperLogLogOperators.class)
+                .scalars(LikeFunctions.class)
+                .scalars(ArrayFunctions.class)
                 .scalar(ArrayCardinalityFunction.class)
                 .scalar(ArrayContains.class)
                 .scalar(ArrayPositionFunction.class)
-                .scalar(CombineHashFunction.class)
-                .scalar(JsonOperators.class)
-                .scalar(FailureFunction.class)
+                .scalars(CombineHashFunction.class)
+                .scalars(JsonOperators.class)
+                .scalars(FailureFunction.class)
                 .scalar(DecimalOperators.Negation.class)
                 .scalar(DecimalOperators.HashCode.class)
                 .functions(IDENTITY_CAST, CAST_FROM_UNKNOWN)
@@ -407,6 +428,7 @@ public class FunctionRegistry
                 .scalar(ArrayGreaterThanOrEqualOperator.class)
                 .scalar(ArrayElementAtFunction.class)
                 .scalar(ArraySortFunction.class)
+                .scalar(ArrayReverseFunction.class)
                 .scalar(ArrayMinFunction.class)
                 .scalar(ArrayMaxFunction.class)
                 .scalar(ArrayDistinctFunction.class)
@@ -415,6 +437,7 @@ public class FunctionRegistry
                 .scalar(ArrayEqualOperator.class)
                 .scalar(ArrayHashCodeOperator.class)
                 .scalar(ArrayIntersectFunction.class)
+                .scalar(ArrayUnionFunction.class)
                 .scalar(ArraySliceFunction.class)
                 .scalar(MapEqualOperator.class)
                 .scalar(MapNotEqualOperator.class)
@@ -433,8 +456,8 @@ public class FunctionRegistry
                 .functions(ARRAY_CONSTRUCTOR, ARRAY_SUBSCRIPT, ARRAY_TO_JSON, JSON_TO_ARRAY)
                 .functions(MAP_CONSTRUCTOR, MAP_SUBSCRIPT, MAP_TO_JSON, JSON_TO_MAP)
                 .functions(MAP_AGG, MULTIMAP_AGG, MAP_UNION)
-                .functions(DECIMAL_TO_VARCHAR_CAST, DECIMAL_TO_INTEGER_CAST, DECIMAL_TO_BIGINT_CAST, DECIMAL_TO_DOUBLE_CAST, DECIMAL_TO_BOOLEAN_CAST, DECIMAL_TO_TINYINT_CAST, DECIMAL_TO_SMALLINT_CAST)
-                .functions(VARCHAR_TO_DECIMAL_CAST, INTEGER_TO_DECIMAL_CAST, BIGINT_TO_DECIMAL_CAST, DOUBLE_TO_DECIMAL_CAST, BOOLEAN_TO_DECIMAL_CAST, TINYINT_TO_DECIMAL_CAST, SMALLINT_TO_DECIMAL_CAST)
+                .functions(DECIMAL_TO_VARCHAR_CAST, DECIMAL_TO_INTEGER_CAST, DECIMAL_TO_BIGINT_CAST, DECIMAL_TO_DOUBLE_CAST, DECIMAL_TO_FLOAT_CAST, DECIMAL_TO_BOOLEAN_CAST, DECIMAL_TO_TINYINT_CAST, DECIMAL_TO_SMALLINT_CAST)
+                .functions(VARCHAR_TO_DECIMAL_CAST, INTEGER_TO_DECIMAL_CAST, BIGINT_TO_DECIMAL_CAST, DOUBLE_TO_DECIMAL_CAST, FLOAT_TO_DECIMAL_CAST, BOOLEAN_TO_DECIMAL_CAST, TINYINT_TO_DECIMAL_CAST, SMALLINT_TO_DECIMAL_CAST)
                 .functions(JSON_TO_DECIMAL_CAST, DECIMAL_TO_JSON_CAST)
                 .functions(DECIMAL_ADD_OPERATOR, DECIMAL_SUBTRACT_OPERATOR, DECIMAL_MULTIPLY_OPERATOR, DECIMAL_DIVIDE_OPERATOR, DECIMAL_MODULUS_OPERATOR)
                 .functions(DECIMAL_EQUAL_OPERATOR, DECIMAL_NOT_EQUAL_OPERATOR)
@@ -447,7 +470,6 @@ public class FunctionRegistry
                 .function(VARCHAR_TO_VARCHAR_CAST)
                 .function(IDENTITY_CAST)
                 .function(ARBITRARY_AGGREGATION)
-                .function(ARRAY_AGGREGATION)
                 .functions(GREATEST, LEAST)
                 .functions(MAX_BY, MIN_BY, MAX_BY_N_AGGREGATION, MIN_BY_N_AGGREGATION)
                 .functions(MAX_AGGREGATION, MIN_AGGREGATION, MAX_N_AGGREGATION, MIN_N_AGGREGATION)
@@ -457,12 +479,14 @@ public class FunctionRegistry
                 .function(DECIMAL_TO_DECIMAL_CAST)
                 .function(TRY_CAST);
 
+        builder.function(new ArrayAggregationFunction(featuresConfig.isLegacyArrayAgg()));
+
         switch (featuresConfig.getRegexLibrary()) {
             case JONI:
-                builder.scalar(JoniRegexpFunctions.class);
+                builder.scalars(JoniRegexpFunctions.class);
                 break;
             case RE2J:
-                builder.scalar(Re2JRegexpFunctions.class)
+                builder.scalars(Re2JRegexpFunctions.class)
                         .function(new Re2JCastToRegexpFunction(featuresConfig.getRe2JDfaStatesLimit(), featuresConfig.getRe2JDfaRetries()));
                 break;
         }

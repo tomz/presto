@@ -66,6 +66,8 @@ public class TaskInfoFetcher
     private final HttpClient httpClient;
     private final RequestErrorTracker errorTracker;
 
+    private final boolean summarizeTaskInfo;
+
     @GuardedBy("this")
     private final AtomicLong currentRequestStartNanos = new AtomicLong();
 
@@ -93,6 +95,7 @@ public class TaskInfoFetcher
             Duration updateInterval,
             JsonCodec<TaskInfo> taskInfoCodec,
             Duration minErrorDuration,
+            boolean summarizeTaskInfo,
             Executor executor,
             ScheduledExecutorService updateScheduledExecutor,
             ScheduledExecutorService errorScheduledExecutor,
@@ -110,6 +113,8 @@ public class TaskInfoFetcher
         this.updateIntervalMillis = requireNonNull(updateInterval, "updateInterval is null").toMillis();
         this.updateScheduledExecutor = requireNonNull(updateScheduledExecutor, "updateScheduledExecutor is null");
         this.errorTracker = new RequestErrorTracker(taskId, initialTask.getTaskStatus().getSelf(), minErrorDuration, errorScheduledExecutor, "getting info for task");
+
+        this.summarizeTaskInfo = summarizeTaskInfo;
 
         this.executor = requireNonNull(executor, "executor is null");
         this.httpClient = requireNonNull(httpClient, "httpClient is null");
@@ -131,9 +136,22 @@ public class TaskInfoFetcher
         scheduleUpdate();
     }
 
+    public synchronized void abort(TaskStatus taskStatus)
+    {
+        updateTaskInfo(taskInfo.get().withTaskStatus(taskStatus));
+        // For aborted tasks we do not care about the final task info, so stop the info fetcher
+        stop();
+    }
+
     public synchronized void taskStatusDone(TaskStatus taskStatus)
     {
-        taskStatusDone.set(taskStatus);
+        if (running && !isDone(getTaskInfo())) {
+            // try to get the last task status from the remote task
+            taskStatusDone.set(taskStatus);
+        }
+        else {
+            getTaskInfo().withTaskStatus(taskStatus);
+        }
     }
 
     private synchronized void stop()
@@ -143,7 +161,9 @@ public class TaskInfoFetcher
             future.cancel(true);
             future = null;
         }
-        scheduledFuture.cancel(true);
+        if (scheduledFuture != null) {
+            scheduledFuture.cancel(true);
+        }
     }
 
     private synchronized void scheduleUpdate()
@@ -195,6 +215,9 @@ public class TaskInfoFetcher
         // if this is the last request, don't summarize, get the complete taskInfo
         URI uri = lastRequest.get() ? httpUriBuilder.build() : httpUriBuilder.addParameter("summarize").build();
 
+        if (summarizeTaskInfo) {
+            httpUriBuilder.addParameter("summarize");
+        }
         Request request = prepareGet()
                 .setUri(uri)
                 .setHeader(CONTENT_TYPE, JSON_UTF_8.toString())

@@ -126,7 +126,7 @@ public class TestShardEjector
         shardManager.createTable(tableId, columns, false);
 
         long transactionId = shardManager.beginTransaction();
-        shardManager.commitShards(transactionId, tableId, columns, shards, Optional.empty());
+        shardManager.commitShards(transactionId, tableId, columns, shards, Optional.empty(), 0);
 
         for (ShardInfo shard : shards.subList(0, 8)) {
             File file = storageService.getStorageFile(shard.getShardUuid());
@@ -136,7 +136,7 @@ public class TestShardEjector
 
         ejector.process();
 
-        shardManager.getShardNodes(tableId, false, false, TupleDomain.all());
+        shardManager.getShardNodes(tableId, TupleDomain.all());
 
         Set<UUID> ejectedShards = shards.subList(0, 4).stream()
                 .map(ShardInfo::getShardUuid)
@@ -169,7 +169,7 @@ public class TestShardEjector
 
     private long createTable(String name)
     {
-        return dbi.onDemand(MetadataDao.class).insertTable("test", name, false, null);
+        return dbi.onDemand(MetadataDao.class).insertTable("test", name, false, null, 0);
     }
 
     private static Set<UUID> uuids(Set<ShardMetadata> metadata)

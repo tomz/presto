@@ -14,7 +14,10 @@
 package com.facebook.presto.hive;
 
 import com.facebook.presto.hive.HiveWriteUtils.FieldSetter;
-import com.facebook.presto.hive.metastore.HiveMetastore;
+import com.facebook.presto.hive.metastore.ExtendedHiveMetastore;
+import com.facebook.presto.hive.metastore.Partition;
+import com.facebook.presto.hive.metastore.StorageFormat;
+import com.facebook.presto.hive.metastore.Table;
 import com.facebook.presto.spi.ConnectorPageSink;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.Page;
@@ -41,10 +44,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.FileUtils;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.metastore.MetaStoreUtils;
-import org.apache.hadoop.hive.metastore.api.Partition;
-import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
-import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.ql.exec.FileSinkOperator.RecordWriter;
 import org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat;
 import org.apache.hadoop.hive.serde2.SerDeException;
@@ -87,6 +86,7 @@ import static com.facebook.presto.hive.HiveType.toHiveTypes;
 import static com.facebook.presto.hive.HiveWriteUtils.createFieldSetter;
 import static com.facebook.presto.hive.HiveWriteUtils.getField;
 import static com.facebook.presto.hive.HiveWriteUtils.getRowColumnInspectors;
+import static com.facebook.presto.hive.metastore.MetastoreUtil.getHiveSchema;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_FOUND;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
@@ -130,7 +130,7 @@ public class HivePageSink
     private final LocationService locationService;
     private final String filePrefix;
 
-    private final HiveMetastore metastore;
+    private final ExtendedHiveMetastore metastore;
     private final PageIndexer pageIndexer;
     private final TypeManager typeManager;
     private final HdfsEnvironment hdfsEnvironment;
@@ -162,7 +162,7 @@ public class HivePageSink
             LocationService locationService,
             String filePrefix,
             Optional<HiveBucketProperty> bucketProperty,
-            HiveMetastore metastore,
+            ExtendedHiveMetastore metastore,
             PageIndexerFactory pageIndexerFactory,
             TypeManager typeManager,
             HdfsEnvironment hdfsEnvironment,
@@ -426,7 +426,7 @@ public class HivePageSink
                         Object value = getField(partitionColumnTypes.get(field), partitionBlocks[field], position);
                         partitionRow.set(field, value);
                     }
-                    writer = createWriter(partitionRow, filePrefix + "_bucket-" + Strings.padStart(Integer.toString(bucket), BUCKET_NUMBER_PADDING, '0'));
+                    writer = createWriter(partitionRow, computeBucketedFileName(filePrefix, bucket));
                     writers.put(bucket, writer);
                 }
 
@@ -434,6 +434,11 @@ public class HivePageSink
             }
         }
         return NOT_BLOCKED;
+    }
+
+    public static String computeBucketedFileName(String filePrefix, int bucket)
+    {
+        return filePrefix + "_bucket-" + Strings.padStart(Integer.toString(bucket), BUCKET_NUMBER_PADDING, '0');
     }
 
     private HiveRecordWriter createWriter(List<Object> partitionRow, String fileName)
@@ -455,7 +460,7 @@ public class HivePageSink
         // attempt to get the existing partition (if this is an existing partitioned table)
         Optional<Partition> partition = Optional.empty();
         if (!partitionRow.isEmpty() && table != null) {
-            partition = metastore.getPartition(schemaName, tableName, partitionName.get());
+            partition = metastore.getPartition(schemaName, tableName, partitionValues);
         }
 
         boolean isNew;
@@ -507,13 +512,7 @@ public class HivePageSink
                     }
                     isNew = false;
                 }
-                schema = MetaStoreUtils.getSchema(
-                        table.getSd(),
-                        table.getSd(),
-                        table.getParameters(),
-                        schemaName,
-                        tableName,
-                        table.getPartitionKeys());
+                schema = getHiveSchema(table);
                 target = locationService.targetPath(locationHandle, partitionName);
                 write = locationService.writePath(locationHandle, partitionName).orElse(target);
             }
@@ -542,10 +541,10 @@ public class HivePageSink
             // Append to an existing partition
             HiveWriteUtils.checkPartitionIsWritable(partitionName.get(), partition.get());
 
-            StorageDescriptor storageDescriptor = partition.get().getSd();
-            outputFormat = storageDescriptor.getOutputFormat();
-            serDe = storageDescriptor.getSerdeInfo().getSerializationLib();
-            schema = MetaStoreUtils.getSchema(partition.get(), table);
+            StorageFormat storageFormat = partition.get().getStorage().getStorageFormat();
+            outputFormat = storageFormat.getOutputFormat();
+            serDe = storageFormat.getSerDe();
+            schema = getHiveSchema(partition.get(), table);
 
             target = locationService.targetPath(locationHandle, partition.get(), partitionName.get());
             write = locationService.writePath(locationHandle, partitionName).orElse(target);
@@ -560,14 +559,14 @@ public class HivePageSink
                 outputFormat,
                 serDe,
                 schema,
-                fileName + getFileExtension(outputFormat),
+                fileName + getFileExtension(conf, outputFormat),
                 write.toString(),
                 target.toString(),
                 typeManager,
                 conf);
     }
 
-    private String getFileExtension(String outputFormat)
+    static String getFileExtension(JobConf conf, String outputFormat)
     {
         // text format files must have the correct extension when compressed
         if (!HiveConf.getBoolVar(conf, COMPRESSRESULT) || !HiveIgnoreKeyTextOutputFormat.class.getName().equals(outputFormat)) {

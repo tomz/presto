@@ -13,12 +13,15 @@
  */
 package com.facebook.presto.operator.scalar;
 
-import com.facebook.presto.operator.Description;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.function.Description;
+import com.facebook.presto.spi.function.OperatorDependency;
+import com.facebook.presto.spi.function.ScalarFunction;
+import com.facebook.presto.spi.function.SqlType;
+import com.facebook.presto.spi.function.TypeParameter;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.type.SqlType;
 import com.google.common.base.Throwables;
 import io.airlift.slice.Slice;
 
@@ -26,8 +29,8 @@ import javax.annotation.Nullable;
 
 import java.lang.invoke.MethodHandle;
 
-import static com.facebook.presto.metadata.OperatorType.EQUAL;
-import static com.facebook.presto.spi.StandardErrorCode.INTERNAL_ERROR;
+import static com.facebook.presto.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
+import static com.facebook.presto.spi.function.OperatorType.EQUAL;
 
 @Description("Determines whether given value exists in the array")
 @ScalarFunction("contains")
@@ -65,7 +68,7 @@ public final class ArrayContains
                 Throwables.propagateIfInstanceOf(t, Error.class);
                 Throwables.propagateIfInstanceOf(t, PrestoException.class);
 
-                throw new PrestoException(INTERNAL_ERROR, t);
+                throw new PrestoException(GENERIC_INTERNAL_ERROR, t);
             }
         }
         if (foundNull) {
@@ -97,7 +100,7 @@ public final class ArrayContains
                 Throwables.propagateIfInstanceOf(t, Error.class);
                 Throwables.propagateIfInstanceOf(t, PrestoException.class);
 
-                throw new PrestoException(INTERNAL_ERROR, t);
+                throw new PrestoException(GENERIC_INTERNAL_ERROR, t);
             }
         }
         if (foundNull) {
@@ -129,7 +132,7 @@ public final class ArrayContains
                 Throwables.propagateIfInstanceOf(t, Error.class);
                 Throwables.propagateIfInstanceOf(t, PrestoException.class);
 
-                throw new PrestoException(INTERNAL_ERROR, t);
+                throw new PrestoException(GENERIC_INTERNAL_ERROR, t);
             }
         }
         if (foundNull) {
@@ -161,7 +164,7 @@ public final class ArrayContains
                 Throwables.propagateIfInstanceOf(t, Error.class);
                 Throwables.propagateIfInstanceOf(t, PrestoException.class);
 
-                throw new PrestoException(INTERNAL_ERROR, t);
+                throw new PrestoException(GENERIC_INTERNAL_ERROR, t);
             }
         }
         if (foundNull) {
@@ -193,7 +196,7 @@ public final class ArrayContains
                 Throwables.propagateIfInstanceOf(t, Error.class);
                 Throwables.propagateIfInstanceOf(t, PrestoException.class);
 
-                throw new PrestoException(INTERNAL_ERROR, t);
+                throw new PrestoException(GENERIC_INTERNAL_ERROR, t);
             }
         }
         if (foundNull) {

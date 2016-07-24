@@ -17,19 +17,47 @@ import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
+import com.facebook.presto.spi.block.BlockBuilderStatus;
+import com.facebook.presto.spi.block.ShortArrayBlockBuilder;
 
-import static com.facebook.presto.spi.StandardErrorCode.INTERNAL_ERROR;
+import static com.facebook.presto.spi.StandardErrorCode.GENERIC_INTERNAL_ERROR;
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
-import static io.airlift.slice.SizeOf.SIZE_OF_SHORT;
 
 public final class SmallintType
-        extends AbstractFixedWidthType
+        extends AbstractType
+        implements FixedWidthType
 {
     public static final SmallintType SMALLINT = new SmallintType();
 
     private SmallintType()
     {
-        super(parseTypeSignature(StandardTypes.SMALLINT), long.class, SIZE_OF_SHORT);
+        super(parseTypeSignature(StandardTypes.SMALLINT), long.class);
+    }
+
+    @Override
+    public int getFixedSize()
+    {
+        return Short.BYTES;
+    }
+
+    @Override
+    public BlockBuilder createBlockBuilder(BlockBuilderStatus blockBuilderStatus, int expectedEntries, int expectedBytesPerEntry)
+    {
+        return new ShortArrayBlockBuilder(
+                blockBuilderStatus,
+                Math.min(expectedEntries, blockBuilderStatus.getMaxBlockSizeInBytes() / Short.BYTES));
+    }
+
+    @Override
+    public BlockBuilder createBlockBuilder(BlockBuilderStatus blockBuilderStatus, int expectedEntries)
+    {
+        return createBlockBuilder(blockBuilderStatus, expectedEntries, Short.BYTES);
+    }
+
+    @Override
+    public BlockBuilder createFixedSizeBlockBuilder(int positionCount)
+    {
+        return new ShortArrayBlockBuilder(new BlockBuilderStatus(), positionCount);
     }
 
     @Override
@@ -99,16 +127,17 @@ public final class SmallintType
     public void writeLong(BlockBuilder blockBuilder, long value)
     {
         if (value > Short.MAX_VALUE) {
-            throw new PrestoException(INTERNAL_ERROR, String.format("Value %d exceeds MAX_SHORT", value));
+            throw new PrestoException(GENERIC_INTERNAL_ERROR, String.format("Value %d exceeds MAX_SHORT", value));
         }
         else if (value < Short.MIN_VALUE) {
-            throw new PrestoException(INTERNAL_ERROR, String.format("Value %d is less than MIN_SHORT", value));
+            throw new PrestoException(GENERIC_INTERNAL_ERROR, String.format("Value %d is less than MIN_SHORT", value));
         }
 
         blockBuilder.writeShort((int) value).closeEntry();
     }
 
     @Override
+    @SuppressWarnings("EqualsWhichDoesntCheckParameterClass")
     public boolean equals(Object other)
     {
         return other == SMALLINT;

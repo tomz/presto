@@ -18,12 +18,12 @@ import com.facebook.presto.metadata.FunctionListBuilder;
 import com.facebook.presto.metadata.SqlFunction;
 import com.facebook.presto.spi.session.PropertyMetadata;
 import com.facebook.presto.spi.type.TimeZoneKey;
-import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.analyzer.SemanticException;
 import com.facebook.presto.testing.MaterializedResult;
 import com.facebook.presto.testing.MaterializedRow;
 import com.facebook.presto.testing.QueryRunner;
-import com.facebook.presto.type.TypeRegistry;
+import com.facebook.presto.type.SqlIntervalDayTime;
+import com.facebook.presto.type.SqlIntervalYearMonth;
 import com.facebook.presto.util.DateTimeZoneIndex;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableList;
@@ -83,11 +83,11 @@ public abstract class AbstractTestQueries
         extends AbstractTestQueryFramework
 {
     // We can just use the default type registry, since we don't use any parametric types
-    protected static final List<SqlFunction> CUSTOM_FUNCTIONS = new FunctionListBuilder(new TypeRegistry())
+    protected static final List<SqlFunction> CUSTOM_FUNCTIONS = new FunctionListBuilder()
             .aggregate(CustomSum.class)
-            .window("custom_rank", BIGINT, ImmutableList.<Type>of(), CustomRank.class)
-            .scalar(CustomAdd.class)
-            .scalar(CreateHll.class)
+            .window(CustomRank.class)
+            .scalars(CustomAdd.class)
+            .scalars(CreateHll.class)
             .getFunctions();
 
     public static final List<PropertyMetadata<?>> TEST_SYSTEM_PROPERTIES = ImmutableList.of(
@@ -136,6 +136,19 @@ public abstract class AbstractTestQueries
     }
 
     @Test
+    public void selectLargeInterval()
+            throws Exception
+    {
+        MaterializedResult result = computeActual("SELECT INTERVAL '30' DAY");
+        assertEquals(result.getRowCount(), 1);
+        assertEquals(result.getMaterializedRows().get(0).getField(0), new SqlIntervalDayTime(30, 0, 0, 0, 0));
+
+        result = computeActual("SELECT INTERVAL '" + Integer.MAX_VALUE + "' YEAR");
+        assertEquals(result.getRowCount(), 1);
+        assertEquals(result.getMaterializedRows().get(0).getField(0), new SqlIntervalYearMonth(Integer.MAX_VALUE, 0));
+    }
+
+    @Test
     public void selectNull()
             throws Exception
     {
@@ -172,6 +185,16 @@ public abstract class AbstractTestQueries
             assertEquals(materializedRow.getFieldCount(), 2);
             assertEquals(((Number) materializedRow.getField(0)).intValue() + 1, materializedRow.getField(1));
         }
+    }
+
+    @Test
+    public void testMapSubscript()
+            throws Exception
+    {
+        assertQuery("select map(array[1], array['aa'])[1]", "select 'aa'");
+        assertQuery("select map(array['a'], array['aa'])['a']", "select 'aa'");
+        assertQuery("select map(array[array[1,1]], array['a'])[array[1,1]]", "select 'a'");
+        assertQuery("select map(array[(1,2)], array['a'])[(1,2)]", "select 'a'");
     }
 
     @Test
@@ -1457,6 +1480,28 @@ public abstract class AbstractTestQueries
     }
 
     @Test
+    public void testGroupingSetsWithSingleDistinctAndUnion()
+            throws Exception
+    {
+        assertQuery("SELECT linenumber, COUNT(DISTINCT linenumber) FROM " +
+                        "(SELECT * FROM lineitem WHERE linenumber%2 = 0 UNION ALL SELECT * FROM lineitem WHERE linenumber%2 = 1) " +
+                        "GROUP BY GROUPING SETS ((linenumber), ())",
+                "SELECT DISTINCT linenumber, 1 FROM lineitem UNION ALL " +
+                        "SELECT NULL, COUNT(DISTINCT linenumber) FROM lineitem");
+    }
+
+    @Test
+    public void testGroupingSetsWithMultipleDistinctAndUnion()
+            throws Exception
+    {
+        assertQuery("SELECT linenumber, COUNT(DISTINCT linenumber), SUM(DISTINCT suppkey) FROM " +
+                        "(SELECT * FROM lineitem WHERE linenumber%2 = 0 UNION ALL SELECT * FROM lineitem WHERE linenumber%2 = 1) " +
+                        "GROUP BY GROUPING SETS ((linenumber), ())",
+                "SELECT linenumber, 1, SUM(DISTINCT suppkey) FROM lineitem GROUP BY linenumber UNION ALL " +
+                        "SELECT NULL, COUNT(DISTINCT linenumber), SUM(DISTINCT suppkey) FROM lineitem");
+    }
+
+    @Test
     public void testRollup()
             throws Exception
     {
@@ -1499,6 +1544,24 @@ public abstract class AbstractTestQueries
                         "SELECT orderkey, partkey, NULL, linenumber, SUM(CAST(quantity AS BIGINT)) FROM lineitem GROUP BY orderkey, partkey, linenumber UNION ALL " +
                         "SELECT orderkey, partkey, suppkey, NULL, SUM(CAST(quantity AS BIGINT)) FROM lineitem GROUP BY orderkey, partkey, suppkey UNION ALL " +
                         "SELECT orderkey, partkey, NULL, NULL, SUM(CAST(quantity AS BIGINT)) FROM lineitem GROUP BY orderkey, partkey");
+    }
+
+    @Test
+    public void testRollupOverUnion()
+            throws Exception
+    {
+        assertQuery("" +
+                "SELECT orderstatus, sum(orderkey)\n" +
+                "FROM (SELECT orderkey, orderstatus\n" +
+                "      FROM orders\n" +
+                "      UNION ALL\n" +
+                "      SELECT orderkey, orderstatus\n" +
+                "      FROM orders) x\n" +
+                "GROUP BY ROLLUP (orderstatus)",
+                "VALUES ('P', 21470000),\n" +
+                        "('O', 439774330),\n" +
+                        "('F', 438500670),\n" +
+                        "(NULL, 899745000)");
     }
 
     @Test
@@ -4714,13 +4777,16 @@ public abstract class AbstractTestQueries
         });
 
         assertTrue(functions.containsKey("avg"), "Expected function names " + functions + " to contain 'avg'");
-        assertEquals(functions.get("avg").asList().size(), 2);
+        assertEquals(functions.get("avg").asList().size(), 3);
         assertEquals(functions.get("avg").asList().get(0).getField(1), "double");
         assertEquals(functions.get("avg").asList().get(0).getField(2), "bigint");
         assertEquals(functions.get("avg").asList().get(0).getField(3), "aggregate");
         assertEquals(functions.get("avg").asList().get(1).getField(1), "double");
         assertEquals(functions.get("avg").asList().get(1).getField(2), "double");
-        assertEquals(functions.get("avg").asList().get(0).getField(3), "aggregate");
+        assertEquals(functions.get("avg").asList().get(1).getField(3), "aggregate");
+        assertEquals(functions.get("avg").asList().get(2).getField(1), "float");
+        assertEquals(functions.get("avg").asList().get(2).getField(2), "float");
+        assertEquals(functions.get("avg").asList().get(2).getField(3), "aggregate");
 
         assertTrue(functions.containsKey("abs"), "Expected function names " + functions + " to contain 'abs'");
         assertEquals(functions.get("abs").asList().get(0).getField(3), "scalar");
@@ -5603,6 +5669,67 @@ public abstract class AbstractTestQueries
     }
 
     @Test
+    public void testExistsSubquery()
+            throws Exception
+    {
+        // nested
+        assertQuery("SELECT EXISTS(SELECT NOT EXISTS(SELECT EXISTS(SELECT 1)))");
+
+        // aggregation
+        assertQuery("SELECT COUNT(*) FROM lineitem WHERE " +
+                "EXISTS(SELECT max(orderkey) FROM orders)");
+        assertQuery("SELECT COUNT(*) FROM lineitem WHERE " +
+                "NOT EXISTS(SELECT max(orderkey) FROM orders)");
+        assertQuery("SELECT COUNT(*) FROM lineitem WHERE " +
+                "NOT EXISTS(SELECT orderkey FROM orders WHERE false)");
+
+        // no output
+        assertQuery("SELECT COUNT(*) FROM lineitem WHERE " +
+                "EXISTS(SELECT orderkey FROM orders WHERE false)");
+        assertQuery("SELECT COUNT(*) FROM lineitem WHERE " +
+                "NOT EXISTS(SELECT orderkey FROM orders WHERE false)");
+
+        // exists with in-predicate
+        assertQuery("SELECT (EXISTS(SELECT 1)) IN (false)", "SELECT false");
+        assertQuery("SELECT (NOT EXISTS(SELECT 1)) IN (false)", "SELECT true");
+
+        assertQuery("SELECT (EXISTS(SELECT 1)) IN (true, false)", "SELECT true");
+        assertQuery("SELECT (NOT EXISTS(SELECT 1)) IN (true, false)", "SELECT true");
+
+        assertQuery("SELECT (EXISTS(SELECT 1 WHERE false)) IN (true, false)", "SELECT true");
+        assertQuery("SELECT (NOT EXISTS(SELECT 1 WHERE false)) IN (true, false)", "SELECT true");
+
+        assertQuery("SELECT (EXISTS(SELECT 1 WHERE false)) IN (false)", "SELECT true");
+        assertQuery("SELECT (NOT EXISTS(SELECT 1 WHERE false)) IN (false)", "SELECT false");
+
+        // multiple exists
+        assertQuery("SELECT (EXISTS(SELECT 1)) = (EXISTS(SELECT 1)) WHERE NOT EXISTS(SELECT 1)", "SELECT true WHERE false");
+        assertQuery("SELECT (EXISTS(SELECT 1)) = (EXISTS(SELECT 3)) WHERE NOT EXISTS(SELECT 1 WHERE false)", "SELECT true");
+        assertQuery("SELECT COUNT(*) FROM lineitem WHERE " +
+                "(EXISTS(SELECT min(orderkey) FROM orders))" +
+                "=" +
+                "(NOT EXISTS(SELECT orderkey FROM orders WHERE false))",
+                "SELECT count(*) FROM lineitem");
+        assertQuery("SELECT EXISTS(SELECT 1), EXISTS(SELECT 1), EXISTS(SELECT 3), NOT EXISTS(SELECT 1), NOT EXISTS(SELECT 1 WHERE false)");
+
+        // distinct
+        assertQuery("SELECT DISTINCT orderkey FROM lineitem " +
+                "WHERE EXISTS(SELECT avg(orderkey) FROM orders)");
+
+        // subqueries with joins
+        for (String joinType : ImmutableList.of("INNER", "LEFT OUTER")) {
+            assertQuery("SELECT l.orderkey, COUNT(*) " +
+                    "FROM lineitem l " + joinType + " JOIN orders o ON l.orderkey = o.orderkey " +
+                    "WHERE EXISTS(SELECT avg(orderkey) FROM orders) " +
+                    "GROUP BY l.orderkey");
+        }
+
+        // subqueries with ORDER BY
+        assertQuery("SELECT orderkey, totalprice FROM orders ORDER BY EXISTS(SELECT 2)");
+        assertQuery("SELECT orderkey, totalprice FROM orders ORDER BY NOT(EXISTS(SELECT 2))");
+    }
+
+    @Test
     public void testScalarSubqueryWithGroupBy()
             throws Exception
     {
@@ -5643,6 +5770,60 @@ public abstract class AbstractTestQueries
                 "FROM lineitem " +
                 "GROUP BY linenumber, (SELECT count(orderkey) FROM orders WHERE orderkey < 7)" +
                 "HAVING min(orderkey) < (SELECT sum(orderkey) FROM orders WHERE orderkey < 7)");
+    }
+
+    @Test
+    public void testOutputInEnforceSingleRow()
+            throws Exception
+    {
+        assertQuery("SELECT count(*) FROM (SELECT (SELECT 1))");
+        assertQuery("SELECT * FROM (SELECT (SELECT 1))");
+        assertQueryFails(
+                "SELECT * FROM (SELECT (SELECT 1, 2))",
+                "line 1:23: Multiple columns returned by subquery are not yet supported. Found 2");
+    }
+
+    @Test
+    public void testExistsSubqueryWithGroupBy()
+            throws Exception
+    {
+        // using the same subquery in query
+        assertQuery("SELECT linenumber, min(orderkey), EXISTS(SELECT orderkey FROM orders WHERE orderkey < 7)" +
+                "FROM lineitem " +
+                "GROUP BY linenumber");
+
+        assertQuery("SELECT linenumber, min(orderkey), EXISTS(SELECT orderkey FROM orders WHERE orderkey < 7)" +
+                "FROM lineitem " +
+                "GROUP BY linenumber, EXISTS(SELECT orderkey FROM orders WHERE orderkey < 7)");
+
+        assertQuery("SELECT linenumber, min(orderkey) " +
+                "FROM lineitem " +
+                "GROUP BY linenumber, EXISTS(SELECT orderkey FROM orders WHERE orderkey < 7)");
+
+        assertQuery("SELECT linenumber, min(orderkey) " +
+                "FROM lineitem " +
+                "GROUP BY linenumber " +
+                "HAVING EXISTS(SELECT orderkey FROM orders WHERE orderkey < 7)");
+
+        assertQuery("SELECT linenumber, min(orderkey), EXISTS(SELECT orderkey FROM orders WHERE orderkey < 7)" +
+                "FROM lineitem " +
+                "GROUP BY linenumber, EXISTS(SELECT orderkey FROM orders WHERE orderkey < 7)" +
+                "HAVING EXISTS(SELECT orderkey FROM orders WHERE orderkey < 7)");
+
+        // using different subqueries
+        assertQuery("SELECT linenumber, min(orderkey), EXISTS(SELECT orderkey FROM orders WHERE orderkey < 7)" +
+                "FROM lineitem " +
+                "GROUP BY linenumber, EXISTS(SELECT orderkey FROM orders WHERE orderkey < 17)");
+
+        assertQuery("SELECT linenumber, max(orderkey), EXISTS(SELECT orderkey FROM orders WHERE orderkey < 5)" +
+                "FROM lineitem " +
+                "GROUP BY linenumber " +
+                "HAVING EXISTS(SELECT orderkey FROM orders WHERE orderkey < 7)");
+
+        assertQuery("SELECT linenumber, min(orderkey), EXISTS(SELECT orderkey FROM orders WHERE orderkey < 17)" +
+                "FROM lineitem " +
+                "GROUP BY linenumber, EXISTS(SELECT orderkey FROM orders WHERE orderkey < 17)" +
+                "HAVING EXISTS(SELECT orderkey FROM orders WHERE orderkey < 27)");
     }
 
     @Test
@@ -5687,6 +5868,28 @@ public abstract class AbstractTestQueries
 
         // subrelation
         assertQueryFails("SELECT * FROM lineitem l WHERE l.orderkey = (SELECT * FROM (SELECT 1 IN (SELECT l.orderkey)))", errorMsg);
+    }
+
+    @Test
+    public void testCorrelatedExistsSubqueries()
+            throws Exception
+    {
+        String errorMsg = "line .*: Correlated queries not yet supported. Invalid column reference: .*";
+
+        assertQueryFails("SELECT EXISTS(SELECT l.orderkey) FROM lineitem l", errorMsg);
+        assertQueryFails("SELECT * FROM lineitem l WHERE EXISTS(SELECT l.orderkey)", errorMsg);
+        assertQueryFails("SELECT * FROM lineitem l ORDER BY EXISTS(SELECT l.orderkey)", errorMsg);
+
+        // group by
+        assertQueryFails("SELECT max(l.quantity), l.orderkey, EXISTS(SELECT l.orderkey) FROM lineitem l GROUP BY l.orderkey", errorMsg);
+        assertQueryFails("SELECT max(l.quantity), l.orderkey FROM lineitem l GROUP BY l.orderkey HAVING EXISTS (SELECT l.orderkey)", errorMsg);
+        assertQueryFails("SELECT max(l.quantity), l.orderkey FROM lineitem l GROUP BY l.orderkey, EXISTS (SELECT l.orderkey)", errorMsg);
+
+        // join
+        assertQueryFails("SELECT * FROM lineitem l1 JOIN lineitem l2 ON EXISTS(SELECT l1.orderkey = l2.orderkey)", errorMsg);
+
+        // subrelation
+        assertQueryFails("SELECT * FROM lineitem l WHERE l.orderkey= (SELECT * FROM (SELECT EXISTS( SELECT l.orderkey)))", errorMsg);
     }
 
     @Test

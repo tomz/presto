@@ -14,6 +14,8 @@
 package com.facebook.presto.tests;
 
 import com.facebook.presto.Session;
+import com.facebook.presto.client.IntervalDayTime;
+import com.facebook.presto.client.IntervalYearMonth;
 import com.facebook.presto.client.QueryResults;
 import com.facebook.presto.server.testing.TestingPrestoServer;
 import com.facebook.presto.spi.type.DecimalType;
@@ -23,6 +25,8 @@ import com.facebook.presto.spi.type.VarcharType;
 import com.facebook.presto.testing.MaterializedResult;
 import com.facebook.presto.testing.MaterializedRow;
 import com.facebook.presto.type.ArrayType;
+import com.facebook.presto.type.SqlIntervalDayTime;
+import com.facebook.presto.type.SqlIntervalYearMonth;
 import com.google.common.base.Function;
 import com.google.common.collect.ImmutableList;
 import io.airlift.log.Logger;
@@ -55,6 +59,8 @@ import static com.facebook.presto.spi.type.TimestampWithTimeZoneType.TIMESTAMP_W
 import static com.facebook.presto.spi.type.TinyintType.TINYINT;
 import static com.facebook.presto.spi.type.VarbinaryType.VARBINARY;
 import static com.facebook.presto.testing.MaterializedResult.DEFAULT_PRECISION;
+import static com.facebook.presto.type.IntervalDayTimeType.INTERVAL_DAY_TIME;
+import static com.facebook.presto.type.IntervalYearMonthType.INTERVAL_YEAR_MONTH;
 import static com.facebook.presto.util.DateTimeUtils.parseDate;
 import static com.facebook.presto.util.DateTimeUtils.parseTime;
 import static com.facebook.presto.util.DateTimeUtils.parseTimeWithTimeZone;
@@ -202,6 +208,12 @@ public class TestingPrestoClient
         }
         else if (TIMESTAMP_WITH_TIME_ZONE.equals(type)) {
             return new Timestamp(unpackMillisUtc(parseTimestampWithTimeZone(timeZoneKey, (String) value)));
+        }
+        else if (INTERVAL_DAY_TIME.equals(type)) {
+            return new SqlIntervalDayTime(IntervalDayTime.parseMillis(String.valueOf(value)));
+        }
+        else if (INTERVAL_YEAR_MONTH.equals(type)) {
+            return new SqlIntervalYearMonth(IntervalYearMonth.parseMonths(String.valueOf(value)));
         }
         else if (type instanceof ArrayType) {
             return ((List<Object>) value).stream()

@@ -16,11 +16,15 @@ package com.facebook.presto.hive;
 import com.facebook.presto.GroupByHashPageIndexerFactory;
 import com.facebook.presto.hadoop.HadoopFileStatus;
 import com.facebook.presto.hive.authentication.NoHdfsAuthentication;
+import com.facebook.presto.hive.metastore.BridgingHiveMetastore;
 import com.facebook.presto.hive.metastore.CachingHiveMetastore;
-import com.facebook.presto.hive.metastore.HiveMetastore;
+import com.facebook.presto.hive.metastore.Column;
+import com.facebook.presto.hive.metastore.ExtendedHiveMetastore;
+import com.facebook.presto.hive.metastore.StorageFormat;
+import com.facebook.presto.hive.metastore.Table;
+import com.facebook.presto.hive.metastore.ThriftHiveMetastore;
 import com.facebook.presto.hive.orc.OrcPageSource;
 import com.facebook.presto.hive.parquet.ParquetHiveRecordCursor;
-import com.facebook.presto.hive.rcfile.RcFilePageSource;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ConnectorInsertTableHandle;
@@ -86,10 +90,9 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.metastore.TableType;
-import org.apache.hadoop.hive.metastore.api.FieldSchema;
-import org.apache.hadoop.hive.metastore.api.SerDeInfo;
-import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
-import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hadoop.hive.metastore.api.PrincipalPrivilegeSet;
+import org.apache.hadoop.hive.metastore.api.PrincipalType;
+import org.apache.hadoop.hive.metastore.api.PrivilegeGrantInfo;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.testng.TestException;
@@ -287,7 +290,7 @@ public abstract class AbstractTestHiveClient
     protected LocationService locationService;
 
     protected HiveMetadataFactory metadataFactory;
-    protected HiveMetastore metastoreClient;
+    protected ExtendedHiveMetastore metastoreClient;
     protected ConnectorSplitManager splitManager;
     protected ConnectorPageSourceProvider pageSourceProvider;
     protected ConnectorPageSinkProvider pageSinkProvider;
@@ -445,7 +448,7 @@ public abstract class AbstractTestHiveClient
         }
 
         HiveCluster hiveCluster = new TestingHiveCluster(hiveClientConfig, host, port);
-        metastoreClient = new CachingHiveMetastore(hiveCluster, executor, Duration.valueOf("1m"), Duration.valueOf("15s"));
+        metastoreClient = new CachingHiveMetastore(new BridgingHiveMetastore(new ThriftHiveMetastore(hiveCluster)), executor, Duration.valueOf("1m"), Duration.valueOf("15s"));
         HiveConnectorId connectorId = new HiveConnectorId(connectorName);
         HdfsConfiguration hdfsConfiguration = new HiveHdfsConfiguration(new HdfsConfigurationUpdater(hiveClientConfig));
 
@@ -462,12 +465,15 @@ public abstract class AbstractTestHiveClient
                 10,
                 true,
                 true,
+                true,
+                true,
                 HiveStorageFormat.RCBINARY,
                 typeManager,
                 locationService,
                 new TableParameterCodec(),
                 partitionUpdateCodec,
-                newFixedThreadPool(2));
+                newFixedThreadPool(2),
+                new HiveTypeTranslator());
         splitManager = new HiveSplitManager(
                 connectorId,
                 metastoreClient,
@@ -1316,13 +1322,13 @@ public abstract class AbstractTestHiveClient
             sink.finish();
 
             // verify we have data files
-            assertFalse(listAllDataFiles(outputHandle).isEmpty());
+            assertFalse(listAllDataFiles(getStagingPathRoot(outputHandle)).isEmpty());
 
             // rollback the table
             rollback(metadata);
 
             // verify all files have been deleted
-            assertTrue(listAllDataFiles(outputHandle).isEmpty());
+            assertTrue(listAllDataFiles(getStagingPathRoot(outputHandle)).isEmpty());
 
             // verify table is not in the metastore
             assertNull(metadata.getTableHandle(session, temporaryCreateRollbackTable));
@@ -1621,7 +1627,7 @@ public abstract class AbstractTestHiveClient
         Collection<Slice> fragments = sink.finish();
 
         // verify all new files start with the unique prefix
-        for (String filePath : listAllDataFiles(outputHandle)) {
+        for (String filePath : listAllDataFiles(getStagingPathRoot(outputHandle))) {
             assertTrue(new Path(filePath).getName().startsWith(getFilePrefix(outputHandle)));
         }
 
@@ -1667,16 +1673,14 @@ public abstract class AbstractTestHiveClient
                 .map(column -> new ColumnMetadata(
                         column.getName(),
                         column.getType(),
-                        annotateColumnComment(column.getComment(), partitionedBy.contains(column.getName())),
+                        annotateColumnComment(Optional.ofNullable(column.getComment()), partitionedBy.contains(column.getName())),
                         false))
                 .collect(toList());
         assertEquals(tableMetadata.getColumns(), expectedColumns);
 
         // verify table format
         Table table = getMetastoreClient(tableName.getSchemaName()).getTable(tableName.getSchemaName(), tableName.getTableName()).get();
-        if (!table.getSd().getInputFormat().equals(storageFormat.getInputFormat())) {
-            assertEquals(table.getSd().getInputFormat(), storageFormat.getInputFormat());
-        }
+        assertEquals(table.getStorage().getStorageFormat().getInputFormat(), storageFormat.getInputFormat());
 
         // verify the table is empty
         List<ColumnHandle> columnHandles = ImmutableList.copyOf(metadata.getColumnHandles(session, tableHandle).values());
@@ -1744,7 +1748,7 @@ public abstract class AbstractTestHiveClient
         assertEquals(listAllDataFiles(tableName.getSchemaName(), tableName.getTableName()), existingFiles);
 
         // verify all temp files start with the unique prefix
-        Set<String> tempFiles = listAllDataFiles(insertTableHandle);
+        Set<String> tempFiles = listAllDataFiles(getStagingPathRoot(insertTableHandle));
         assertTrue(!tempFiles.isEmpty());
         for (String filePath : tempFiles) {
             assertTrue(new Path(filePath).getName().startsWith(getFilePrefix(insertTableHandle)));
@@ -1761,7 +1765,7 @@ public abstract class AbstractTestHiveClient
         assertEquals(listAllDataFiles(tableName.getSchemaName(), tableName.getTableName()), existingFiles);
 
         // verify temp directory is empty
-        assertTrue(listAllDataFiles(insertTableHandle).isEmpty());
+        assertTrue(listAllDataFiles(getStagingPathRoot(insertTableHandle)).isEmpty());
     }
 
     // These are protected so extensions to the hive connector can replace the handle classes
@@ -1775,20 +1779,22 @@ public abstract class AbstractTestHiveClient
         return ((HiveInsertTableHandle) insertTableHandle).getFilePrefix();
     }
 
-    protected Set<String> listAllDataFiles(ConnectorOutputTableHandle tableHandle)
-            throws IOException
+    protected Path getStagingPathRoot(ConnectorInsertTableHandle insertTableHandle)
     {
-        HiveOutputTableHandle hiveOutputTableHandle = (HiveOutputTableHandle) tableHandle;
-        Path writePath = new Path(getLocationService(hiveOutputTableHandle.getSchemaName()).writePathRoot(hiveOutputTableHandle.getLocationHandle()).get().toString());
-        return listAllDataFiles(writePath);
+        HiveInsertTableHandle hiveInsertTableHandle = (HiveInsertTableHandle) insertTableHandle;
+        return getLocationService(hiveInsertTableHandle.getSchemaName()).writePathRoot(hiveInsertTableHandle.getLocationHandle()).get();
     }
 
-    protected Set<String> listAllDataFiles(ConnectorInsertTableHandle tableHandle)
-            throws IOException
+    protected Path getStagingPathRoot(ConnectorOutputTableHandle outputTableHandle)
     {
-        HiveInsertTableHandle hiveInsertTableHandle = (HiveInsertTableHandle) tableHandle;
-        Path writePath = new Path(getLocationService(hiveInsertTableHandle.getSchemaName()).writePathRoot(hiveInsertTableHandle.getLocationHandle()).get().toString());
-        return listAllDataFiles(writePath);
+        HiveOutputTableHandle hiveOutputTableHandle = (HiveOutputTableHandle) outputTableHandle;
+        return getLocationService(hiveOutputTableHandle.getSchemaName()).writePathRoot(hiveOutputTableHandle.getLocationHandle()).get();
+    }
+
+    protected Path getTargetPathRoot(ConnectorInsertTableHandle insertTableHandle)
+    {
+        HiveInsertTableHandle hiveInsertTableHandle = (HiveInsertTableHandle) insertTableHandle;
+        return getLocationService(hiveInsertTableHandle.getSchemaName()).targetPathRoot(hiveInsertTableHandle.getLocationHandle());
     }
 
     protected Set<String> listAllDataFiles(String schemaName, String tableName)
@@ -1801,22 +1807,23 @@ public abstract class AbstractTestHiveClient
         return existingFiles;
     }
 
-    public static List<String> listAllDataPaths(HiveMetastore metastore, String schemaName, String tableName)
+    public static List<String> listAllDataPaths(ExtendedHiveMetastore metastore, String schemaName, String tableName)
     {
         ImmutableList.Builder<String> locations = ImmutableList.builder();
         Table table = metastore.getTable(schemaName, tableName).get();
-        if (table.getSd().getLocation() != null) {
+        if (table.getStorage().getLocation() != null) {
             // For unpartitioned table, there should be nothing directly under this directory.
             // But including this location in the set makes the directory content assert more
             // extensive, which is desirable.
-            locations.add(table.getSd().getLocation());
+            locations.add(table.getStorage().getLocation());
         }
 
         Optional<List<String>> partitionNames = metastore.getPartitionNames(schemaName, tableName);
         if (partitionNames.isPresent()) {
-            metastore.getPartitionsByNames(schemaName, tableName, partitionNames.get()).get().values().stream()
-                    .map(partition -> partition.getSd().getLocation())
-                    .filter(location -> !location.startsWith(table.getSd().getLocation()))
+            metastore.getPartitionsByNames(schemaName, tableName, partitionNames.get()).values().stream()
+                    .map(Optional::get)
+                    .map(partition -> partition.getStorage().getLocation())
+                    .filter(location -> !location.startsWith(table.getStorage().getLocation()))
                     .forEach(locations::add);
         }
 
@@ -1887,7 +1894,7 @@ public abstract class AbstractTestHiveClient
         assertEquals(listAllDataFiles(tableName.getSchemaName(), tableName.getTableName()), existingFiles);
 
         // verify all temp files start with the unique prefix
-        Set<String> tempFiles = listAllDataFiles(insertTableHandle);
+        Set<String> tempFiles = listAllDataFiles(getStagingPathRoot(insertTableHandle));
         assertTrue(!tempFiles.isEmpty());
         for (String filePath : tempFiles) {
             assertTrue(new Path(filePath).getName().startsWith(getFilePrefix(insertTableHandle)));
@@ -1904,14 +1911,14 @@ public abstract class AbstractTestHiveClient
         assertEquals(listAllDataFiles(tableName.getSchemaName(), tableName.getTableName()), existingFiles);
 
         // verify temp directory is empty
-        assertTrue(listAllDataFiles(insertTableHandle).isEmpty());
+        assertTrue(listAllDataFiles(getStagingPathRoot(insertTableHandle)).isEmpty());
     }
 
     private void doInsertUnsupportedWriteType(HiveStorageFormat storageFormat, SchemaTableName tableName)
             throws Exception
     {
-        List<FieldSchema> columns = ImmutableList.of(new FieldSchema("dummy", "uniontype<smallint,tinyint>", null));
-        List<FieldSchema> partitionColumns = ImmutableList.of(new FieldSchema("name", "string", null));
+        List<Column> columns = ImmutableList.of(new Column("dummy", HiveType.valueOf("uniontype<smallint,tinyint>"), Optional.empty()));
+        List<Column> partitionColumns = ImmutableList.of(new Column("name", HIVE_STRING, Optional.empty()));
 
         createEmptyTable(tableName, storageFormat, columns, partitionColumns);
 
@@ -1984,7 +1991,7 @@ public abstract class AbstractTestHiveClient
         assertEquals(listAllDataFiles(tableName.getSchemaName(), tableName.getTableName()), existingFiles);
 
         // verify all temp files start with the unique prefix
-        Set<String> tempFiles = listAllDataFiles(insertTableHandle);
+        Set<String> tempFiles = listAllDataFiles(getStagingPathRoot(insertTableHandle));
         assertTrue(!tempFiles.isEmpty());
         for (String filePath : tempFiles) {
             assertTrue(new Path(filePath).getName().startsWith(getFilePrefix(insertTableHandle)));
@@ -2001,10 +2008,11 @@ public abstract class AbstractTestHiveClient
         assertEquals(listAllDataFiles(tableName.getSchemaName(), tableName.getTableName()), existingFiles);
 
         // verify temp directory is empty
-        assertTrue(listAllDataFiles(insertTableHandle).isEmpty());
+        assertTrue(listAllDataFiles(getStagingPathRoot(insertTableHandle)).isEmpty());
     }
 
     private void insertData(ConnectorTableHandle tableHandle, MaterializedResult data, ConnectorSession session)
+            throws Exception
     {
         ConnectorMetadata metadata = newMetadata();
         ConnectorTransactionHandle transaction = newTransaction();
@@ -2018,6 +2026,14 @@ public abstract class AbstractTestHiveClient
 
         // commit the insert
         metadata.finishInsert(session, insertTableHandle, fragments);
+
+        // check that temporary files are removed
+        Path writePath = getStagingPathRoot(insertTableHandle);
+        Path targetPath = getTargetPathRoot(insertTableHandle);
+        if (!writePath.equals(targetPath)) {
+            FileSystem fileSystem = hdfsEnvironment.getFileSystem("user", writePath);
+            assertFalse(fileSystem.exists(writePath));
+        }
     }
 
     private void doMetadataDelete(HiveStorageFormat storageFormat, SchemaTableName tableName)
@@ -2395,7 +2411,7 @@ public abstract class AbstractTestHiveClient
         return new MaterializedResult(allRows.build(), getTypes(columnHandles));
     }
 
-    public HiveMetastore getMetastoreClient(String namespace)
+    public ExtendedHiveMetastore getMetastoreClient(String namespace)
     {
         return metastoreClient;
     }
@@ -2472,9 +2488,6 @@ public abstract class AbstractTestHiveClient
     private static Class<? extends ConnectorPageSource> pageSourceType(HiveStorageFormat hiveStorageFormat)
     {
         switch (hiveStorageFormat) {
-            case RCTEXT:
-            case RCBINARY:
-                return RcFilePageSource.class;
             case ORC:
             case DWRF:
                 return OrcPageSource.class;
@@ -2537,7 +2550,7 @@ public abstract class AbstractTestHiveClient
         assertTrue(map.containsKey(name));
         ColumnMetadata column = map.get(name);
         assertEquals(column.getType(), type, name);
-        assertEquals(column.getComment(), annotateColumnComment(null, partitionKey));
+        assertEquals(column.getComment(), annotateColumnComment(Optional.empty(), partitionKey));
     }
 
     protected static ImmutableMap<String, Integer> indexColumns(List<ColumnHandle> columnHandles)
@@ -2583,7 +2596,7 @@ public abstract class AbstractTestHiveClient
                 .build();
     }
 
-    protected void createEmptyTable(SchemaTableName schemaTableName, HiveStorageFormat hiveStorageFormat, List<FieldSchema> columns, List<FieldSchema> partitionColumns)
+    protected void createEmptyTable(SchemaTableName schemaTableName, HiveStorageFormat hiveStorageFormat, List<Column> columns, List<Column> partitionColumns)
             throws Exception
     {
         ConnectorSession session = newSession();
@@ -2597,28 +2610,25 @@ public abstract class AbstractTestHiveClient
         Path targetPath = locationService.targetPathRoot(locationHandle);
         HiveWriteUtils.createDirectory(session.getUser(), hdfsEnvironment, targetPath);
 
-        SerDeInfo serdeInfo = new SerDeInfo();
-        serdeInfo.setName(tableName);
-        serdeInfo.setSerializationLib(hiveStorageFormat.getSerDe());
-        serdeInfo.setParameters(ImmutableMap.of());
+        Table.Builder tableBuilder = Table.builder()
+                .setDatabaseName(schemaName)
+                .setTableName(tableName)
+                .setOwner(tableOwner)
+                .setTableType(TableType.MANAGED_TABLE.name())
+                .setParameters(ImmutableMap.of())
+                .setDataColumns(columns)
+                .setPartitionColumns(partitionColumns);
 
-        StorageDescriptor sd = new StorageDescriptor();
-        sd.setLocation(targetPath.toString());
-        sd.setCols(columns);
-        sd.setSerdeInfo(serdeInfo);
-        sd.setInputFormat(hiveStorageFormat.getInputFormat());
-        sd.setOutputFormat(hiveStorageFormat.getOutputFormat());
-        sd.setParameters(ImmutableMap.of());
+        tableBuilder.getStorageBuilder()
+                .setLocation(targetPath.toString())
+                .setStorageFormat(StorageFormat.create(hiveStorageFormat.getSerDe(), hiveStorageFormat.getInputFormat(), hiveStorageFormat.getOutputFormat()))
+                .setSerdeParameters(ImmutableMap.of());
 
-        Table table = new Table();
-        table.setDbName(schemaName);
-        table.setTableName(tableName);
-        table.setOwner(tableOwner);
-        table.setTableType(TableType.MANAGED_TABLE.toString());
-        table.setParameters(ImmutableMap.of());
-        table.setPartitionKeys(partitionColumns);
-        table.setSd(sd);
-
-        getMetastoreClient(schemaName).createTable(table);
+        PrivilegeGrantInfo allPrivileges = new PrivilegeGrantInfo("all", 0, tableOwner, PrincipalType.USER, true);
+        PrincipalPrivilegeSet principalPrivilegeSet = new PrincipalPrivilegeSet(
+                ImmutableMap.of(session.getUser(), ImmutableList.of(allPrivileges)),
+                ImmutableMap.of(),
+                ImmutableMap.of());
+        getMetastoreClient(schemaName).createTable(tableBuilder.build(), principalPrivilegeSet);
     }
 }

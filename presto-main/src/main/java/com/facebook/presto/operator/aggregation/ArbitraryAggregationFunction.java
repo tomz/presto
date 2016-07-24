@@ -17,8 +17,6 @@ import com.facebook.presto.bytecode.DynamicClassLoader;
 import com.facebook.presto.metadata.BoundVariables;
 import com.facebook.presto.metadata.FunctionRegistry;
 import com.facebook.presto.metadata.SqlAggregationFunction;
-import com.facebook.presto.operator.aggregation.state.AccumulatorState;
-import com.facebook.presto.operator.aggregation.state.AccumulatorStateSerializer;
 import com.facebook.presto.operator.aggregation.state.BlockState;
 import com.facebook.presto.operator.aggregation.state.BlockStateSerializer;
 import com.facebook.presto.operator.aggregation.state.NullableBooleanState;
@@ -28,6 +26,8 @@ import com.facebook.presto.operator.aggregation.state.SliceState;
 import com.facebook.presto.operator.aggregation.state.StateCompiler;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
+import com.facebook.presto.spi.function.AccumulatorState;
+import com.facebook.presto.spi.function.AccumulatorStateSerializer;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.google.common.collect.ImmutableList;
@@ -43,6 +43,7 @@ import static com.facebook.presto.operator.aggregation.AggregationMetadata.Param
 import static com.facebook.presto.operator.aggregation.AggregationMetadata.ParameterMetadata.ParameterType.STATE;
 import static com.facebook.presto.operator.aggregation.AggregationUtils.generateAggregationName;
 import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
+import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.facebook.presto.util.Reflection.methodHandle;
 
 public class ArbitraryAggregationFunction
@@ -133,7 +134,7 @@ public class ArbitraryAggregationFunction
         Type intermediateType = stateSerializer.getSerializedType();
         List<ParameterMetadata> inputParameterMetadata = createInputParameterMetadata(type);
         AggregationMetadata metadata = new AggregationMetadata(
-                generateAggregationName(NAME, type, inputTypes),
+                generateAggregationName(NAME, type.getTypeSignature(), inputTypes.stream().map(Type::getTypeSignature).collect(toImmutableList())),
                 inputParameterMetadata,
                 inputFunction,
                 inputParameterMetadata,

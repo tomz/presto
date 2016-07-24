@@ -14,9 +14,9 @@ Concatenation Operator: ||
 
 The ``||`` operator is used to concatenate an array with an array or an element of the same type::
 
-    SELECT ARRAY [1] || ARRAY [2]; => [1, 2]
-    SELECT ARRAY [1] || 2; => [1, 2]
-    SELECT 2 || ARRAY [1]; => [2, 1]
+    SELECT ARRAY [1] || ARRAY [2]; -- [1, 2]
+    SELECT ARRAY [1] || 2; -- [1, 2]
+    SELECT 2 || ARRAY [1]; -- [2, 1]
 
 Array Functions
 ---------------
@@ -28,6 +28,10 @@ Array Functions
 .. function:: array_intersect(x, y) -> array
 
     Returns an array of the elements in the intersection of ``x`` and ``y``, without duplicates.
+
+.. function:: array_union(x, y) -> array
+
+    Returns an array of the elements in the union of ``x`` and ``y``, without duplicates.
 
 .. function:: array_join(x, delimiter, null_replacement) -> varchar
 
@@ -77,6 +81,11 @@ Array Functions
 
     Flattens an ``array(array(T))`` to an ``array(T)`` by concatenating the contained arrays.
 
+.. function:: reverse(x) -> array
+    :noindex:
+
+    Returns an array which has the reversed order of array ``x``.
+
 .. function:: sequence(start, stop) -> array<bigint>
 
     Generate a sequence of integers from ``start`` to ``stop``, incrementing
@@ -102,4 +111,4 @@ Array Functions
     the N-th argument will be the N-th field of the M-th output element.
     If the arguments have an uneven length, missing values are filled with ``NULL``. ::
 
-        SELECT zip(ARRAY[1, 2], ARRAY['1b', null, '3b']); => [ROW(1, '1b'), ROW(2, null), ROW(null, '3b')]
+        SELECT zip(ARRAY[1, 2], ARRAY['1b', null, '3b']); -- [ROW(1, '1b'), ROW(2, null), ROW(null, '3b')]

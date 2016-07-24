@@ -16,8 +16,8 @@ package com.facebook.presto.sql.planner;
 import com.facebook.presto.Session;
 import com.facebook.presto.SystemSessionProperties;
 import com.facebook.presto.execution.QueryPerformanceFetcher;
-import com.facebook.presto.execution.SharedBuffer;
 import com.facebook.presto.execution.TaskManagerConfig;
+import com.facebook.presto.execution.buffer.OutputBuffer;
 import com.facebook.presto.index.IndexManager;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.Signature;
@@ -139,7 +139,7 @@ import com.facebook.presto.sql.tree.BooleanLiteral;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.ExpressionTreeRewriter;
 import com.facebook.presto.sql.tree.FunctionCall;
-import com.facebook.presto.sql.tree.QualifiedNameReference;
+import com.facebook.presto.sql.tree.SymbolReference;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -270,13 +270,13 @@ public class LocalExecutionPlanner
             PlanNode plan,
             Map<Symbol, Type> types,
             PartitioningScheme partitioningScheme,
-            SharedBuffer sharedBuffer)
+            OutputBuffer outputBuffer)
     {
         List<Symbol> outputLayout = partitioningScheme.getOutputLayout();
         if (partitioningScheme.getPartitioning().getHandle().equals(FIXED_BROADCAST_DISTRIBUTION) ||
                 partitioningScheme.getPartitioning().getHandle().equals(SINGLE_DISTRIBUTION) ||
                 partitioningScheme.getPartitioning().getHandle().equals(COORDINATOR_DISTRIBUTION)) {
-            return plan(session, plan, outputLayout, types, new TaskOutputFactory(sharedBuffer));
+            return plan(session, plan, outputLayout, types, new TaskOutputFactory(outputBuffer));
         }
 
         // We can convert the symbols directly into channels, because the root must be a sink and therefore the layout is fixed
@@ -326,7 +326,7 @@ public class LocalExecutionPlanner
                 plan,
                 outputLayout,
                 types,
-                new PartitionedOutputFactory(partitionFunction, partitionChannels, partitionConstants, nullChannel, sharedBuffer, maxPagePartitioningBufferSize));
+                new PartitionedOutputFactory(partitionFunction, partitionChannels, partitionConstants, nullChannel, outputBuffer, maxPagePartitioningBufferSize));
     }
 
     public LocalExecutionPlan plan(Session session,
@@ -688,7 +688,7 @@ public class LocalExecutionPlanner
             for (Map.Entry<Symbol, FunctionCall> entry : node.getWindowFunctions().entrySet()) {
                 ImmutableList.Builder<Integer> arguments = ImmutableList.builder();
                 for (Expression argument : entry.getValue().getArguments()) {
-                    Symbol argumentSymbol = Symbol.fromQualifiedName(((QualifiedNameReference) argument).getName());
+                    Symbol argumentSymbol = Symbol.from(argument);
                     arguments.add(source.getLayout().get(argumentSymbol));
                 }
                 Symbol symbol = entry.getKey();
@@ -908,7 +908,7 @@ public class LocalExecutionPlanner
             List<Symbol> outputSymbols = node.getOutputSymbols();
 
             Map<Symbol, Expression> projectionExpressions = outputSymbols.stream()
-                    .collect(Collectors.toMap(x -> x, Symbol::toQualifiedNameReference));
+                    .collect(Collectors.toMap(x -> x, Symbol::toSymbolReference));
 
             return visitScanFilterAndProject(context, node.getId(), sourceNode, filterExpression, projectionExpressions, outputSymbols);
         }
@@ -1054,9 +1054,9 @@ public class LocalExecutionPlanner
             for (Symbol symbol : outputSymbols) {
                 Expression expression = projectionExpressions.get(symbol);
                 ProjectionFunction function;
-                if (expression instanceof QualifiedNameReference) {
+                if (expression instanceof SymbolReference) {
                     // fast path when we know it's a direct symbol reference
-                    Symbol reference = Symbol.fromQualifiedName(((QualifiedNameReference) expression).getName());
+                    Symbol reference = Symbol.from(expression);
                     function = ProjectionFunctions.singleColumn(context.getTypes().get(reference), sourceLayout.get(reference));
                 }
                 else {
@@ -1126,6 +1126,9 @@ public class LocalExecutionPlanner
         @Override
         public PhysicalOperation visitValues(ValuesNode node, LocalExecutionPlanContext context)
         {
+            // a values node must have a single driver
+            context.setDriverInstanceCount(1);
+
             List<Type> outputTypes = new ArrayList<>();
 
             for (Symbol symbol : node.getOutputSymbols()) {
@@ -1698,10 +1701,11 @@ public class LocalExecutionPlanner
         {
             PhysicalOperation source = node.getSource().accept(this, context);
 
-            Symbol symbol = getOnlyElement(node.getOutputSymbols());
-            Type type = requireNonNull(context.getTypes().get(symbol), format("No type for symbol %s", symbol));
+            List<Type> types = node.getOutputSymbols().stream()
+                    .map(symbol -> requireNonNull(context.getTypes().get(symbol), format("No type for symbol %s", symbol)))
+                    .collect(toImmutableList());
 
-            OperatorFactory operatorFactory = new EnforceSingleRowOperator.EnforceSingleRowOperatorFactory(context.getNextOperatorId(), node.getId(), type);
+            OperatorFactory operatorFactory = new EnforceSingleRowOperator.EnforceSingleRowOperatorFactory(context.getNextOperatorId(), node.getId(), types);
             return new PhysicalOperation(operatorFactory, makeLayout(node), source);
         }
 
@@ -1785,7 +1789,7 @@ public class LocalExecutionPlanner
         {
             List<Integer> arguments = new ArrayList<>();
             for (Expression argument : call.getArguments()) {
-                Symbol argumentSymbol = Symbol.fromQualifiedName(((QualifiedNameReference) argument).getName());
+                Symbol argumentSymbol = Symbol.from(argument);
                 arguments.add(source.getLayout().get(argumentSymbol));
             }
 

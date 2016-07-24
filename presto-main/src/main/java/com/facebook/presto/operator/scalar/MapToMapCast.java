@@ -21,17 +21,20 @@ import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
 import com.facebook.presto.spi.block.InterleavedBlockBuilder;
+import com.facebook.presto.spi.function.OperatorDependency;
+import com.facebook.presto.spi.function.ScalarOperator;
+import com.facebook.presto.spi.function.SqlType;
+import com.facebook.presto.spi.function.TypeParameter;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
-import com.facebook.presto.type.SqlType;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 
-import static com.facebook.presto.metadata.OperatorType.CAST;
-import static com.facebook.presto.metadata.OperatorType.EQUAL;
+import static com.facebook.presto.spi.function.OperatorType.CAST;
+import static com.facebook.presto.spi.function.OperatorType.EQUAL;
 import static com.facebook.presto.spi.type.TypeUtils.readNativeValue;
 import static com.facebook.presto.type.TypeJsonUtils.appendToBlockBuilder;
 
@@ -87,7 +90,7 @@ public final class MapToMapCast
             catch (Throwable t) {
                 Throwables.propagateIfInstanceOf(t, Error.class);
                 Throwables.propagateIfInstanceOf(t, PrestoException.class);
-                throw new PrestoException(StandardErrorCode.INTERNAL_ERROR, t);
+                throw new PrestoException(StandardErrorCode.GENERIC_INTERNAL_ERROR, t);
             }
         }
         Block keyBlock = keyBlockBuilder.build();
@@ -104,7 +107,7 @@ public final class MapToMapCast
                 catch (Throwable t) {
                     Throwables.propagateIfInstanceOf(t, Error.class);
                     Throwables.propagateIfInstanceOf(t, PrestoException.class);
-                    throw new PrestoException(StandardErrorCode.INTERNAL_ERROR, t);
+                    throw new PrestoException(StandardErrorCode.GENERIC_INTERNAL_ERROR, t);
                 }
             }
             else {
